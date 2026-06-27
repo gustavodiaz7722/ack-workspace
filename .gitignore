@@ -1,0 +1,17 @@
+# Compiled binary
+/ack-workspace
+ack-workspace.exe
+
+# Test & build artifacts
+*.test
+*.out
+/build/
+/dist/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Editor / OS noise
+.DS_Store
+*.swp
