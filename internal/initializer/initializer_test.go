@@ -65,8 +65,8 @@ func TestInit_AllCreated(t *testing.T) {
 	if got := len(sum.Results); got != len(CommonRepositories) {
 		t.Fatalf("expected %d results, got %d", len(CommonRepositories), got)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != 3 {
-		t.Fatalf("expected 3 created, got %d (results=%+v)", got, sum.Results)
+	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories) {
+		t.Fatalf("expected %d created, got %d (results=%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	if sum.HasFailures() {
 		t.Fatalf("did not expect failures: %+v", sum.Results)
@@ -120,9 +120,9 @@ func TestInit_SkipExistingDirectory(t *testing.T) {
 			t.Fatalf("unexpected GitHub call for skipped repo: %+v", c)
 		}
 	}
-	// The other two repos should have been created.
-	if got := sum.Count(workspace.OutcomeCreated); got != 2 {
-		t.Fatalf("expected 2 created, got %d", got)
+	// The other repos should have been created.
+	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories)-1 {
+		t.Fatalf("expected %d created, got %d", len(CommonRepositories)-1, got)
 	}
 	if got := sum.Count(workspace.OutcomeSkipped); got != 1 {
 		t.Fatalf("expected 1 skipped, got %d", got)
@@ -143,8 +143,8 @@ func TestInit_ForkMissingThenCreated(t *testing.T) {
 	if n := gh.CallCount("CreateFork"); n != len(CommonRepositories) {
 		t.Fatalf("expected %d CreateFork calls, got %d", len(CommonRepositories), n)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != 3 {
-		t.Fatalf("expected 3 created, got %d (results=%+v)", got, sum.Results)
+	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories) {
+		t.Fatalf("expected %d created, got %d (results=%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	// CreateFork should target the upstream repos with the prefixed fork name.
 	for _, c := range gh.CallsFor("CreateFork") {
@@ -168,13 +168,13 @@ func TestInit_ForkCreateFailure(t *testing.T) {
 		t.Fatalf("Init returned unexpected error: %v", err)
 	}
 
-	// All three repos fail (fork creation fails) but every repo is still
+	// All repos fail (fork creation fails) but every repo is still
 	// processed (failure isolation).
-	if got := len(sum.Results); got != 3 {
-		t.Fatalf("expected 3 results, got %d", got)
+	if got := len(sum.Results); got != len(CommonRepositories) {
+		t.Fatalf("expected %d results, got %d", len(CommonRepositories), got)
 	}
-	if got := sum.Count(workspace.OutcomeFailed); got != 3 {
-		t.Fatalf("expected 3 failed, got %d (results=%+v)", got, sum.Results)
+	if got := sum.Count(workspace.OutcomeFailed); got != len(CommonRepositories) {
+		t.Fatalf("expected %d failed, got %d (results=%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	// No clone should have been attempted when the fork could not be created.
 	for _, c := range runner.Calls {
@@ -206,8 +206,8 @@ func TestInit_CloneFailureCleansUp(t *testing.T) {
 		t.Fatalf("Init returned unexpected error: %v", err)
 	}
 
-	if got := sum.Count(workspace.OutcomeFailed); got != 3 {
-		t.Fatalf("expected 3 failed, got %d (results=%+v)", got, sum.Results)
+	if got := sum.Count(workspace.OutcomeFailed); got != len(CommonRepositories) {
+		t.Fatalf("expected %d failed, got %d (results=%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	// Every run-created directory must have been cleaned up.
 	for _, name := range CommonRepositories {
@@ -247,8 +247,8 @@ func TestInit_RemoteConfigFailureCleansUp(t *testing.T) {
 		t.Fatalf("Init returned unexpected error: %v", err)
 	}
 
-	if got := sum.Count(workspace.OutcomeFailed); got != 3 {
-		t.Fatalf("expected 3 failed, got %d (results=%+v)", got, sum.Results)
+	if got := sum.Count(workspace.OutcomeFailed); got != len(CommonRepositories) {
+		t.Fatalf("expected %d failed, got %d (results=%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	for _, name := range CommonRepositories {
 		dir := filepath.Join(root, name)

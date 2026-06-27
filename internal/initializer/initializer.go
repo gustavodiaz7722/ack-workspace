@@ -17,10 +17,15 @@ import (
 // ACK repositories.
 const upstreamOwner = "aws-controllers-k8s"
 
-// CommonRepositories is the fixed set of three core ACK repositories that every
+// CommonRepositories is the fixed set of core ACK repositories that every
 // contributor needs (Requirement 3.3). It is a single constant so the set can
 // be adjusted in one place should the canonical setup change.
-var CommonRepositories = []string{"runtime", "code-generator", "test-infra"}
+//
+// ack-dev-skills packages the ACK development guidance as an Agent Skill; it is
+// bootstrapped the same way as the other core repositories (forked, cloned, and
+// configured) so it sits as a peer next to runtime/code-generator/test-infra in
+// the workspace root, ready to be installed into the contributor's AI tool.
+var CommonRepositories = []string{"runtime", "code-generator", "test-infra", "ack-dev-skills"}
 
 // Initializer implements the Workspace_Initializer. It ensures the
 // Workspace_Root exists and then forks, clones, and configures each
@@ -59,6 +64,7 @@ func (i *Initializer) Init(ctx context.Context, a app.App) (workspace.Summary, e
 	}
 
 	results := engine.Run(ctx, a.Config.Concurrency, tasks)
+
 	return workspace.Summary{Results: results}, nil
 }
 

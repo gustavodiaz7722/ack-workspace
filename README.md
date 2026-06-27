@@ -12,8 +12,8 @@ automates it.
 
 ## Features
 
-- **`init`** — fork, clone, and configure the three core ACK repositories
-  (`runtime`, `code-generator`, `test-infra`).
+- **`init`** — fork, clone, and configure the core ACK repositories
+  (`runtime`, `code-generator`, `test-infra`, and `ack-dev-skills`).
 - **`add`** — fork, clone, and configure one or more service controller repositories
   (or every controller in the ACK org with `add all`).
 - **`sync`** — update managed forks from upstream across the whole workspace, using
@@ -100,11 +100,18 @@ ack-workspace config path     # print the config file path
 
 ### Initialize a workspace
 
-Fork, clone, and configure the core ACK repositories:
+Fork, clone, and configure the core ACK repositories — `runtime`, `code-generator`,
+`test-infra`, and `ack-dev-skills`:
 
 ```bash
 ack-workspace init
 ```
+
+`ack-dev-skills` packages the ACK development guidance as an
+[Agent Skill](https://agentskills.io). It lands as a peer next to the other core repos
+in your workspace root; point your AI tool at it to install the skill (see that repo's
+README for tool-specific steps, e.g. Kiro:
+`ln -s <workspace-root>/ack-dev-skills/skills/ack-dev ~/.kiro/skills/ack-dev`).
 
 ### Add service controllers
 
