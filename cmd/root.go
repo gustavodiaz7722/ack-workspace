@@ -17,6 +17,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/initializer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/inspector"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/syncer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
@@ -115,6 +116,8 @@ type deps struct {
 	statusRun func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error)
 	// removeRun runs the Controller_Remover for the remove command.
 	removeRun func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error)
+	// releaseRun runs the Controller_Releaser for the release command.
+	releaseRun func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool) (workspace.Summary, error)
 }
 
 // defaultDeps returns the production wiring: the real prerequisite checker and
@@ -137,6 +140,13 @@ func defaultDeps() deps {
 		},
 		removeRun: func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error) {
 			return remover.New().Remove(ctx, a, identifiers, opts)
+		},
+		releaseRun: func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool) (workspace.Summary, error) {
+			return releaser.New().Release(ctx, a, service, releaser.Options{
+				Version:    version,
+				BaseBranch: baseBranch,
+				SkipPR:     skipPR,
+			})
 		},
 	}
 }
@@ -175,6 +185,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newSyncCommand(d, res),
 		newStatusCommand(d, res),
 		newRemoveCommand(d, res),
+		newReleaseCommand(d, res),
 		newConfigCommand(),
 	)
 	return cmd, res

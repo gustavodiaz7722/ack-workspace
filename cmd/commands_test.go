@@ -12,6 +12,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
@@ -54,6 +55,12 @@ type recorder struct {
 	removeIDs    []string
 	removeOpts   remover.Options
 
+	releaseCalled  bool
+	releaseService string
+	releaseVersion string
+	releaseBase    string
+	releaseSkipPR  bool
+
 	summary workspace.Summary
 	runErr  error
 }
@@ -87,6 +94,14 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 			rec.removeCalled = true
 			rec.removeIDs = identifiers
 			rec.removeOpts = opts
+			return rec.summary, rec.runErr
+		},
+		releaseRun: func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool) (workspace.Summary, error) {
+			rec.releaseCalled = true
+			rec.releaseService = service
+			rec.releaseVersion = version
+			rec.releaseBase = baseBranch
+			rec.releaseSkipPR = skipPR
 			return rec.summary, rec.runErr
 		},
 	}
@@ -402,7 +417,7 @@ func TestConfigGetMissingIdentityErrors(t *testing.T) {
 // Guard: the root command exposes the expected subcommands.
 func TestRootRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := map[string]bool{"init": false, "add": false, "sync": false, "status": false, "remove": false, "config": false}
+	want := map[string]bool{"init": false, "add": false, "sync": false, "status": false, "remove": false, "release": false, "config": false}
 	for _, c := range cmd.Commands() {
 		name := strings.Fields(c.Use)[0]
 		if _, ok := want[name]; ok {
@@ -515,5 +530,71 @@ func TestRemove_ParsesKeepForkAndForce(t *testing.T) {
 	}
 	if len(rec.removeIDs) != 1 || rec.removeIDs[0] != "all" {
 		t.Errorf("removeRun identifiers = %v, want [all]", rec.removeIDs)
+	}
+}
+
+// --- release command ---------------------------------------------------------
+
+func TestRelease_NeedsGitTokenIdentity(t *testing.T) {
+	isolateEnv(t)
+	chk := &fakeChecker{}
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(chk, rec),
+		"release", "ecr", "--version", "v1.0.1",
+		"--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !chk.called {
+		t.Fatal("prerequisite checker was not called")
+	}
+	want := prereq.Need{Git: true, Token: true, Identity: true}
+	if chk.gotNeed != want {
+		t.Errorf("Need = %+v, want %+v", chk.gotNeed, want)
+	}
+}
+
+func TestRelease_ParsesServiceAndFlags(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"release", "ecr-controller", "--version", "v1.2.0", "--base-branch", "release-1.x", "--skip-pr",
+		"--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.releaseCalled {
+		t.Fatal("releaseRun was not called")
+	}
+	if rec.releaseService != "ecr-controller" {
+		t.Errorf("service = %q, want ecr-controller", rec.releaseService)
+	}
+	if rec.releaseVersion != "v1.2.0" {
+		t.Errorf("version = %q, want v1.2.0", rec.releaseVersion)
+	}
+	if rec.releaseBase != "release-1.x" {
+		t.Errorf("base branch = %q, want release-1.x", rec.releaseBase)
+	}
+	if !rec.releaseSkipPR {
+		t.Error("skipPR = false, want true")
+	}
+}
+
+func TestRelease_MissingVersionSurfacesUsageError(t *testing.T) {
+	isolateEnv(t)
+	// Use the real Controller_Releaser so the version-required rule is enforced
+	// where it lives. A passing checker isolates the releaser's behavior.
+	d := defaultDeps()
+	d.checker = &fakeChecker{}
+
+	_, _, err := runCmd(t, d,
+		"release", "ecr",
+		"--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err == nil {
+		t.Fatal("expected a usage error for a missing version, got nil")
+	}
+	var ue *releaser.UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("error type = %T, want *releaser.UsageError", err)
 	}
 }

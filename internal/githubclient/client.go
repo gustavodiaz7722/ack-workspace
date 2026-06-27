@@ -50,6 +50,24 @@ type GitHubClient interface {
 	// delete a contributor's fork; callers must never pass an upstream
 	// (organization) repository. Requires a token with the delete_repo scope.
 	DeleteRepo(ctx context.Context, ref RepoRef) error
+	// CreatePullRequest opens a pull request against the upstream repository and
+	// returns the URL of the created PR. For a cross-fork PR the in.Head field
+	// must be namespaced as "<fork-owner>:<branch>".
+	CreatePullRequest(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error)
+}
+
+// NewPullRequest describes the pull request CreatePullRequest opens.
+type NewPullRequest struct {
+	// Title is the PR title.
+	Title string
+	// Body is the PR description (Markdown).
+	Body string
+	// Head is the branch the changes live on. For a pull request opened from a
+	// fork it must be namespaced "<fork-owner>:<branch>".
+	Head string
+	// Base is the branch on the upstream repository the changes should merge
+	// into (for example "main").
+	Base string
 }
 
 // ForkTimeoutError is returned by CreateFork when a newly requested fork does
@@ -182,6 +200,21 @@ func (a *Adapter) DeleteRepo(ctx context.Context, ref RepoRef) error {
 		return fmt.Errorf("deleting repository %s: %w", ref, err)
 	}
 	return nil
+}
+
+// CreatePullRequest opens a pull request on upstream and returns the HTML URL of
+// the created PR.
+func (a *Adapter) CreatePullRequest(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error) {
+	pr, _, err := a.rest.PullRequests.Create(ctx, upstream.Owner, upstream.Name, &github.NewPullRequest{
+		Title: github.String(in.Title),
+		Body:  github.String(in.Body),
+		Head:  github.String(in.Head),
+		Base:  github.String(in.Base),
+	})
+	if err != nil {
+		return "", fmt.Errorf("creating pull request on %s: %w", upstream, err)
+	}
+	return pr.GetHTMLURL(), nil
 }
 
 // DefaultBranch returns the default branch name of the referenced repository.

@@ -20,6 +20,9 @@ automates it.
   controller with `remove all`). Destructive; requires confirmation.
 - **`sync`** — update managed forks from upstream across the whole workspace, using
   fast-forward-only merges so local work is never lost.
+- **`release`** — cut a release for a single service controller: update its base branch
+  from upstream, create a `release-<version>` branch, regenerate the release artifacts,
+  commit and push them to your fork, and open a pull request against upstream.
 - **`status`** — report the state of every managed repository (branch, dirty flag,
   ahead/behind vs. upstream) as a table or JSON.
 - **`config`** — view and persist your settings.
@@ -63,11 +66,15 @@ anything is missing:
 | `init`   |  yes  |     yes      |       yes       |
 | `add`    |  yes  |     yes      |       yes       |
 | `remove` |  yes  |     yes      |       yes       |
-| `sync`   |  yes  |      no¹     |       no        |
+| `release`|  yes  |     yes¹     |       yes       |
+| `sync`   |  yes  |      no²     |       no        |
 | `status` |  yes  |      no      |       no        |
 | `config` |  no   |      no      |       no        |
 
-¹ `sync` uses git remotes (which carry their own credentials), not the GitHub API.
+¹ `release` needs a token to open the upstream pull request and your identity to name the
+fork branch; pass `--skip-pr` to push the release branch without opening a PR.
+
+² `sync` uses git remotes (which carry their own credentials), not the GitHub API.
 
 Provide a GitHub token via the `--token` flag or the `GITHUB_TOKEN` environment variable.
 The token is **never** written to the config file.
@@ -185,6 +192,41 @@ ack-workspace sync runtime s3-controller --push
 Repositories with uncommitted changes are skipped ("uncommitted changes") and
 repositories whose history has diverged are skipped ("diverged history"); their local
 branches are left untouched.
+
+### Cut a controller release
+
+Mechanize the ACK controller release workflow for a single service controller. The
+controller and the `code-generator` must already be present in your workspace (run `init`
+and `add` first):
+
+```bash
+ack-workspace release ecr --version v1.0.1
+```
+
+This will, on the controller:
+
+1. update the base branch (`main` by default) from `upstream`,
+2. create a branch named `release-v1.0.1`,
+3. regenerate the release artifacts by running the code-generator's
+   `./scripts/build-controller-release.sh ecr` with `RELEASE_VERSION=v1.0.1`,
+4. commit the artifacts as `Release artifacts for release v1.0.1`,
+5. push the branch to your fork (`origin`), and
+6. open a pull request against `aws-controllers-k8s/ecr-controller`.
+
+The service may be a bare alias (`ecr`) or its full form (`ecr-controller`), and the
+version is normalized to carry a leading `v` (`1.0.1` and `v1.0.1` are equivalent). Useful
+flags:
+
+```bash
+ack-workspace release ecr --version v1.0.1 --dry-run      # preview every step
+ack-workspace release ecr --version v1.0.1 --skip-pr      # push the branch, no PR
+ack-workspace release ecr --version v1.0.1 --base-branch release-1.x
+```
+
+Built-in safety: a controller with uncommitted changes is skipped, a base branch that has
+diverged from upstream is reported as a failure (never force-updated), an existing
+`release-<version>` branch is left untouched, and a release that generates no changes is
+reported as a no-op instead of creating an empty commit.
 
 ### Inspect workspace status
 

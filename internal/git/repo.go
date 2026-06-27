@@ -232,3 +232,51 @@ func (r *Repo) Push(ctx context.Context, remote, branch string) error {
 	}
 	return nil
 }
+
+// Checkout switches the working tree to an existing branch by running
+// `git checkout <branch>`. It is used to move onto the base branch before a
+// release run.
+func (r *Repo) Checkout(ctx context.Context, branch string) error {
+	if _, err := r.runner.Run(ctx, r.Path, "checkout", branch); err != nil {
+		return fmt.Errorf("checkout %q: %w", branch, err)
+	}
+	return nil
+}
+
+// CheckoutNewBranch creates branch and switches to it by running
+// `git checkout -b <branch>`. It fails if the branch already exists, so callers
+// that want to skip an existing branch should consult LocalBranchExists first.
+func (r *Repo) CheckoutNewBranch(ctx context.Context, branch string) error {
+	if _, err := r.runner.Run(ctx, r.Path, "checkout", "-b", branch); err != nil {
+		return fmt.Errorf("create branch %q: %w", branch, err)
+	}
+	return nil
+}
+
+// LocalBranchExists reports whether a local branch named branch exists. It runs
+// `git rev-parse --verify --quiet refs/heads/<branch>`, which exits 0 when the
+// ref resolves and 1 when it does not; the exit-1 case is reported as
+// (false, nil) rather than an error, mirroring CanFastForward's handling of the
+// "expected non-zero exit" answer. Any other non-zero exit is surfaced as an
+// error.
+func (r *Repo) LocalBranchExists(ctx context.Context, branch string) (bool, error) {
+	_, err := r.runner.Run(ctx, r.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	if err == nil {
+		return true, nil
+	}
+	if code, ok := exitCodeOf(err); ok && code == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking local branch %q: %w", branch, err)
+}
+
+// CommitAll stages every tracked, modified file and records a commit in one step
+// by running `git commit -a -m <message>`. It is used to capture the generated
+// release artifacts in a single commit; it fails (like git itself) when there is
+// nothing staged to commit, so callers should confirm the tree is dirty first.
+func (r *Repo) CommitAll(ctx context.Context, message string) error {
+	if _, err := r.runner.Run(ctx, r.Path, "commit", "-a", "-m", message); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}

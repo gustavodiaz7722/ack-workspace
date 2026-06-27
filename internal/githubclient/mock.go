@@ -58,13 +58,22 @@ type Mock struct {
 	// delete failure.
 	DeleteRepoErr error
 
+	// PullRequestURL is the URL CreatePullRequest returns on success. It
+	// defaults to a synthetic URL derived from the upstream reference.
+	PullRequestURL string
+
+	// CreatePullRequestErr, when non-nil, is returned by CreatePullRequest to
+	// simulate a PR-creation failure.
+	CreatePullRequestErr error
+
 	// Optional full overrides. When set, they take precedence over the scripted
 	// state above and are still recorded in Calls.
-	RepoExistsFn    func(ctx context.Context, ref RepoRef) (bool, error)
-	DefaultBranchFn func(ctx context.Context, ref RepoRef) (string, error)
-	CreateForkFn    func(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error)
-	ListOrgReposFn  func(ctx context.Context, org string) ([]string, error)
-	DeleteRepoFn    func(ctx context.Context, ref RepoRef) error
+	RepoExistsFn        func(ctx context.Context, ref RepoRef) (bool, error)
+	DefaultBranchFn     func(ctx context.Context, ref RepoRef) (string, error)
+	CreateForkFn        func(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error)
+	ListOrgReposFn      func(ctx context.Context, org string) ([]string, error)
+	DeleteRepoFn        func(ctx context.Context, ref RepoRef) error
+	CreatePullRequestFn func(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error)
 
 	// Calls records every invocation in order.
 	Calls []Call
@@ -90,13 +99,17 @@ type ExistResult struct {
 // Call records a single invocation against the Mock.
 type Call struct {
 	// Method is one of "RepoExists", "DefaultBranch", "CreateFork",
-	// "ListOrgRepos", or "DeleteRepo".
+	// "ListOrgRepos", "DeleteRepo", or "CreatePullRequest".
 	Method string
-	// Ref is the repository reference passed to the call. For CreateFork it is
-	// the upstream reference; for ListOrgRepos only Ref.Owner (the org) is set.
+	// Ref is the repository reference passed to the call. For CreateFork and
+	// CreatePullRequest it is the upstream reference; for ListOrgRepos only
+	// Ref.Owner (the org) is set.
 	Ref RepoRef
 	// ForkName is the requested fork name; populated for CreateFork only.
 	ForkName string
+	// PullRequest is the pull request input; populated for CreatePullRequest
+	// only.
+	PullRequest NewPullRequest
 }
 
 // Ensure the mock satisfies the interface at compile time.
@@ -259,6 +272,24 @@ func (m *Mock) DeleteRepo(ctx context.Context, ref RepoRef) error {
 	defer m.mu.Unlock()
 	delete(m.Repos, ref.String())
 	return nil
+}
+
+// CreatePullRequest records the call and returns the scripted PR URL (or
+// CreatePullRequestErr when set). When PullRequestURL is empty a synthetic URL
+// derived from the upstream reference and head branch is returned.
+func (m *Mock) CreatePullRequest(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error) {
+	m.record(Call{Method: "CreatePullRequest", Ref: upstream, PullRequest: in})
+
+	if m.CreatePullRequestFn != nil {
+		return m.CreatePullRequestFn(ctx, upstream, in)
+	}
+	if m.CreatePullRequestErr != nil {
+		return "", m.CreatePullRequestErr
+	}
+	if m.PullRequestURL != "" {
+		return m.PullRequestURL, nil
+	}
+	return "https://github.com/" + upstream.String() + "/pull/1", nil
 }
 
 // record appends a call under the mutex.
