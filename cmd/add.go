@@ -21,11 +21,14 @@ import (
 // of RunE so the entrypoint (Task 13.3) can map it to a usage exit code.
 func newAddCommand(d deps, res *Result) *cobra.Command {
 	return &cobra.Command{
-		Use:   "add [identifiers...]",
+		Use:   "add [identifiers...|all]",
 		Short: "Fork, clone, and configure service controller repositories",
 		Long: "add forks the named service controller repositories under your GitHub account, " +
 			"clones them into the workspace root, and configures the origin and upstream remotes. " +
-			"Each identifier may be a bare service alias (s3) or its full form (s3-controller).",
+			"Each identifier may be a bare service alias (s3) or its full form (s3-controller).\n\n" +
+			"Pass the special identifier 'all' to set up every controller repository available in " +
+			"the aws-controllers-k8s organization. When 'all' is given it supersedes any other " +
+			"identifiers.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := d.prepare(cmd, prereq.Need{Git: true, Token: true, Identity: true})
 			if err != nil {

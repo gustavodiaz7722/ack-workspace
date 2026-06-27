@@ -207,3 +207,87 @@ func TestAdapterCreateForkTimeout(t *testing.T) {
 		t.Fatalf("timeout fork = %+v, want %+v", timeoutErr.Fork, want)
 	}
 }
+
+// jsonRespWithHeader is like jsonResp but lets a test add response headers (for
+// example a Link header to drive go-github's pagination).
+func jsonRespWithHeader(status int, body string, header http.Header) *http.Response {
+	if header == nil {
+		header = http.Header{}
+	}
+	header.Set("Content-Type", "application/json")
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}
+}
+
+func TestAdapterListOrgRepos(t *testing.T) {
+	const org = "aws-controllers-k8s"
+
+	var (
+		mu    sync.Mutex
+		pages int
+	)
+
+	rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		mu.Lock()
+		pages++
+		page := pages
+		mu.Unlock()
+
+		switch page {
+		case 1:
+			// First page links to a next page; includes one archived repo that
+			// must be filtered out.
+			h := http.Header{}
+			h.Set("Link", `<https://api.github.com/organizations/1/repos?page=2>; rel="next"`)
+			return jsonRespWithHeader(http.StatusOK, `[
+				{"name":"runtime","archived":false},
+				{"name":"s3-controller","archived":false},
+				{"name":"old-controller","archived":true}
+			]`, h), nil
+		case 2:
+			return jsonRespWithHeader(http.StatusOK, `[
+				{"name":"sns-controller","archived":false}
+			]`, nil), nil
+		default:
+			t.Fatalf("unexpected extra page request (page %d)", page)
+			return nil, nil
+		}
+	})
+
+	a := newStubAdapter(rt)
+
+	got, err := a.ListOrgRepos(context.Background(), org)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Both pages must have been read, and the archived repo excluded.
+	want := []string{"runtime", "s3-controller", "sns-controller"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+	if pages != 2 {
+		t.Errorf("expected 2 pages to be fetched, got %d", pages)
+	}
+}
+
+func TestAdapterListOrgReposError(t *testing.T) {
+	a := newStubAdapter(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResp(http.StatusInternalServerError, `{"message":"boom"}`), nil
+	}))
+
+	if _, err := a.ListOrgRepos(context.Background(), "aws-controllers-k8s"); err == nil {
+		t.Fatalf("expected an error, got nil")
+	}
+}

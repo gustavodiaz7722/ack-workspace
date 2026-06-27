@@ -136,3 +136,47 @@ func TestMockCreateForkError(t *testing.T) {
 		t.Fatalf("got %v, want *ForkTimeoutError", err)
 	}
 }
+
+func TestMockListOrgRepos(t *testing.T) {
+	ctx := context.Background()
+	const org = "aws-controllers-k8s"
+
+	m := NewMock()
+	m.SetOrgRepos(org, "runtime", "s3-controller", "sns-controller")
+
+	got, err := m.ListOrgRepos(ctx, org)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"runtime", "s3-controller", "sns-controller"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+
+	// An unconfigured org yields an empty list with no error.
+	if repos, err := m.ListOrgRepos(ctx, "other"); err != nil || len(repos) != 0 {
+		t.Errorf("expected empty list for unconfigured org, got %v err=%v", repos, err)
+	}
+
+	// The call is recorded with the org in Ref.Owner.
+	calls := m.CallsFor("ListOrgRepos")
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 ListOrgRepos calls recorded, got %d", len(calls))
+	}
+	if calls[0].Ref.Owner != org {
+		t.Errorf("recorded org = %q, want %q", calls[0].Ref.Owner, org)
+	}
+}
+
+func TestMockListOrgReposError(t *testing.T) {
+	m := NewMock()
+	m.ListOrgReposErr = errors.New("boom")
+	if _, err := m.ListOrgRepos(context.Background(), "aws-controllers-k8s"); err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+}

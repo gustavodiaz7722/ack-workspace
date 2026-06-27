@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
@@ -32,6 +33,11 @@ const upstreamOwner = "aws-controllers-k8s"
 // name. A bare Service_Alias (for example "s3") and its full form
 // ("s3-controller") both normalize to the same repository.
 const controllerSuffix = "-controller"
+
+// allToken is the special identifier that expands to every Service_Controller_Repository
+// available in the Upstream_Organization. It is matched case-insensitively. When
+// present anywhere in the identifier list it supersedes the other identifiers.
+const allToken = "all"
 
 // UsageError is a typed argument/validation error returned by Add before any
 // repository is processed. The cmd layer maps it to a distinct non-zero exit
@@ -69,6 +75,15 @@ func (a *Adder) Add(ctx context.Context, ap app.App, identifiers []string) (work
 		return workspace.Summary{}, &UsageError{Msg: "at least one service identifier is required"}
 	}
 
+	// Expand the special "all" identifier to every Service_Controller_Repository
+	// available in the Upstream_Organization. This is done before any change is
+	// made under the Workspace_Root; a discovery failure aborts the command
+	// without side effects.
+	identifiers, err := a.expand(ctx, ap, identifiers)
+	if err != nil {
+		return workspace.Summary{}, err
+	}
+
 	root := ap.Config.WorkspaceRoot
 
 	// Requirement 4.1 / 7: build one task per identifier and run them with the
@@ -84,6 +99,58 @@ func (a *Adder) Add(ctx context.Context, ap app.App, identifiers []string) (work
 
 	results := engine.Run(ctx, ap.Config.Concurrency, tasks)
 	return workspace.Summary{Results: results}, nil
+}
+
+// expand resolves the supplied identifiers into the concrete list to process.
+// When the special "all" token (case-insensitive) appears anywhere in the list
+// it supersedes the other identifiers: every Service_Controller_Repository in
+// the Upstream_Organization is discovered via the GitHub_Client, filtered to the
+// "<alias>-controller" naming convention, de-duplicated, and returned sorted.
+// Otherwise the identifiers are returned unchanged.
+//
+// A discovery (listing) failure is returned as the function error so the command
+// fails fast without touching the Workspace_Root; finding no controllers is
+// reported as a *UsageError so the caller exits with a usage code rather than
+// silently doing nothing.
+func (a *Adder) expand(ctx context.Context, ap app.App, identifiers []string) ([]string, error) {
+	if !containsAll(identifiers) {
+		return identifiers, nil
+	}
+
+	repos, err := ap.GitHub.ListOrgRepos(ctx, upstreamOwner)
+	if err != nil {
+		return nil, fmt.Errorf("listing %s controller repositories: %w", upstreamOwner, err)
+	}
+
+	seen := make(map[string]bool, len(repos))
+	controllers := make([]string, 0, len(repos))
+	for _, name := range repos {
+		if !strings.HasSuffix(name, controllerSuffix) {
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		controllers = append(controllers, name)
+	}
+	if len(controllers) == 0 {
+		return nil, &UsageError{Msg: fmt.Sprintf(
+			"no controller repositories found in the %s organization", upstreamOwner)}
+	}
+	sort.Strings(controllers)
+	return controllers, nil
+}
+
+// containsAll reports whether the identifier list includes the special "all"
+// token, ignoring surrounding whitespace and case.
+func containsAll(identifiers []string) bool {
+	for _, id := range identifiers {
+		if strings.EqualFold(strings.TrimSpace(id), allToken) {
+			return true
+		}
+	}
+	return false
 }
 
 // processIdentifier normalizes a single identifier and runs the

@@ -472,3 +472,183 @@ func TestAdd_DryRunResolutionFailureStillReported(t *testing.T) {
 	}
 	assertNoMutatingGitCalls(t, runner)
 }
+
+// TestAdd_AllExpandsToOrgControllers verifies that the special "all" identifier
+// expands to every "<alias>-controller" repository discovered in the
+// organization, ignoring non-controller repositories, and that each discovered
+// controller is set up.
+func TestAdd_AllExpandsToOrgControllers(t *testing.T) {
+	root := t.TempDir()
+	gh := githubclient.NewMock()
+	// The org contains two controllers plus several non-controller repos that
+	// must be filtered out by the "<alias>-controller" naming convention.
+	gh.SetOrgRepos(upstreamOwner,
+		"runtime", "code-generator", "test-infra", "community",
+		"s3-controller", "sns-controller")
+	// The discovered controllers must resolve as existing upstream repos.
+	markUpstreamPresent(gh, "s3-controller", "sns-controller")
+	markForkPresent(gh, "s3-controller")
+	markForkPresent(gh, "sns-controller")
+	runner := &git.MockRunner{}
+
+	sum, err := New().Add(context.Background(), newApp(root, gh, runner), []string{"all"})
+	if err != nil {
+		t.Fatalf("Add returned unexpected error: %v", err)
+	}
+
+	// ListOrgRepos must have been consulted exactly once.
+	if got := gh.CallCount("ListOrgRepos"); got != 1 {
+		t.Errorf("expected ListOrgRepos to be called once, got %d", got)
+	}
+
+	// Only the two controllers should have been processed (created).
+	if got := len(sum.Results); got != 2 {
+		t.Fatalf("expected 2 results, got %d (results=%+v)", got, sum.Results)
+	}
+	if got := sum.Count(workspace.OutcomeCreated); got != 2 {
+		t.Fatalf("expected 2 added, got %d (results=%+v)", got, sum.Results)
+	}
+	byRepo := resultsByRepo(sum)
+	for _, name := range []string{"s3-controller", "sns-controller"} {
+		if byRepo[name].Outcome != workspace.OutcomeCreated {
+			t.Errorf("repo %s: expected created, got %s", name, byRepo[name].Outcome)
+		}
+	}
+	// Non-controller repositories must not have been processed.
+	for _, name := range []string{"runtime", "code-generator", "test-infra", "community"} {
+		if _, ok := byRepo[name]; ok {
+			t.Errorf("non-controller repo %q should not have been processed", name)
+		}
+	}
+}
+
+// TestAdd_AllSupersedesOtherIdentifiers verifies that when "all" appears
+// alongside other identifiers it supersedes them: only the discovered
+// controllers are processed.
+func TestAdd_AllSupersedesOtherIdentifiers(t *testing.T) {
+	root := t.TempDir()
+	gh := githubclient.NewMock()
+	gh.SetOrgRepos(upstreamOwner, "sns-controller")
+	markUpstreamPresent(gh, "sns-controller")
+	markForkPresent(gh, "sns-controller")
+	runner := &git.MockRunner{}
+
+	// "s3" is supplied alongside "all"; it must be ignored in favor of the
+	// discovered controller set.
+	sum, err := New().Add(context.Background(), newApp(root, gh, runner), []string{"s3", "all"})
+	if err != nil {
+		t.Fatalf("Add returned unexpected error: %v", err)
+	}
+
+	byRepo := resultsByRepo(sum)
+	if _, ok := byRepo["s3-controller"]; ok {
+		t.Errorf("s3-controller should not have been processed when 'all' is given")
+	}
+	if byRepo["sns-controller"].Outcome != workspace.OutcomeCreated {
+		t.Errorf("expected sns-controller created, got %+v", byRepo["sns-controller"])
+	}
+	if len(sum.Results) != 1 {
+		t.Errorf("expected exactly 1 result, got %d (%+v)", len(sum.Results), sum.Results)
+	}
+}
+
+// TestAdd_AllListFailureAborts verifies that a failure to list the organization
+// repositories aborts the command with the error surfaced and makes no change
+// under the workspace root.
+func TestAdd_AllListFailureAborts(t *testing.T) {
+	root := t.TempDir()
+	gh := githubclient.NewMock()
+	gh.ListOrgReposErr = errors.New("boom: api error")
+	runner := &git.MockRunner{}
+
+	_, err := New().Add(context.Background(), newApp(root, gh, runner), []string{"all"})
+	if err == nil {
+		t.Fatal("expected an error when listing org repos fails, got nil")
+	}
+	// A listing failure is a runtime error, not a *UsageError.
+	var ue *UsageError
+	if errors.As(err, &ue) {
+		t.Errorf("listing failure should not be a *UsageError, got %v", err)
+	}
+	// No git work and nothing created under the root.
+	if len(runner.Calls) != 0 {
+		t.Errorf("expected no git calls on listing failure, got %+v", runner.Calls)
+	}
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 0 {
+		t.Errorf("expected no modification under workspace root, found %d entries", len(entries))
+	}
+}
+
+// TestAdd_AllNoControllersFound verifies that when the organization contains no
+// controller repositories, "all" yields a *UsageError and no work is done.
+func TestAdd_AllNoControllersFound(t *testing.T) {
+	root := t.TempDir()
+	gh := githubclient.NewMock()
+	// Only non-controller repos are present.
+	gh.SetOrgRepos(upstreamOwner, "runtime", "code-generator", "community")
+	runner := &git.MockRunner{}
+
+	_, err := New().Add(context.Background(), newApp(root, gh, runner), []string{"all"})
+	if err == nil {
+		t.Fatal("expected a usage error when no controllers are found, got nil")
+	}
+	var ue *UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *UsageError, got %T: %v", err, err)
+	}
+	if len(runner.Calls) != 0 {
+		t.Errorf("expected no git calls, got %+v", runner.Calls)
+	}
+}
+
+// TestAdd_AllCaseInsensitive verifies the "all" token is matched ignoring case
+// and surrounding whitespace.
+func TestAdd_AllCaseInsensitive(t *testing.T) {
+	root := t.TempDir()
+	gh := githubclient.NewMock()
+	gh.SetOrgRepos(upstreamOwner, "s3-controller")
+	markUpstreamPresent(gh, "s3-controller")
+	markForkPresent(gh, "s3-controller")
+	runner := &git.MockRunner{}
+
+	sum, err := New().Add(context.Background(), newApp(root, gh, runner), []string{"  ALL "})
+	if err != nil {
+		t.Fatalf("Add returned unexpected error: %v", err)
+	}
+	if gh.CallCount("ListOrgRepos") != 1 {
+		t.Errorf("expected 'ALL' to trigger org listing")
+	}
+	if sum.Count(workspace.OutcomeCreated) != 1 {
+		t.Errorf("expected 1 added, got %+v", sum.Results)
+	}
+}
+
+// TestAdd_AllDryRunMakesNoChange verifies that "all" combined with dry-run
+// discovers controllers (read-only) and previews them without creating forks or
+// invoking git.
+func TestAdd_AllDryRun(t *testing.T) {
+	root := t.TempDir()
+	gh := githubclient.NewMock()
+	gh.SetOrgRepos(upstreamOwner, "s3-controller", "sns-controller")
+	markUpstreamPresent(gh, "s3-controller", "sns-controller")
+	runner := &git.MockRunner{}
+
+	ap := newApp(root, gh, runner)
+	ap.DryRun = true
+
+	sum, err := New().Add(context.Background(), ap, []string{"all"})
+	if err != nil {
+		t.Fatalf("Add returned unexpected error: %v", err)
+	}
+	if got := sum.Count(workspace.OutcomeCreated); got != 2 {
+		t.Fatalf("expected 2 previewed, got %d (%+v)", got, sum.Results)
+	}
+	// Dry-run must not create forks or run git.
+	if gh.CallCount("CreateFork") != 0 {
+		t.Errorf("dry-run must not create forks, got %d", gh.CallCount("CreateFork"))
+	}
+	if len(runner.Calls) != 0 {
+		t.Errorf("dry-run must not invoke git, got %+v", runner.Calls)
+	}
+}

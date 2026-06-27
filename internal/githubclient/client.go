@@ -42,6 +42,10 @@ type GitHubClient interface {
 	// configured timeout, so callers can record the repository as failed rather
 	// than surfacing a clone error.
 	CreateFork(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error)
+	// ListOrgRepos returns the names of the non-archived repositories in the
+	// given organization, following pagination. Archived repositories are
+	// excluded because they are not useful contributor targets.
+	ListOrgRepos(ctx context.Context, org string) ([]string, error)
 }
 
 // ForkTimeoutError is returned by CreateFork when a newly requested fork does
@@ -139,6 +143,33 @@ func (a *Adapter) RepoExists(ctx context.Context, ref RepoRef) (bool, error) {
 		return false, fmt.Errorf("checking repository %s: %w", ref, err)
 	}
 	return true, nil
+}
+
+// ListOrgRepos returns the names of the non-archived repositories in org,
+// following pagination until every page has been read. Archived repositories
+// are skipped because they are not useful contributor targets.
+func (a *Adapter) ListOrgRepos(ctx context.Context, org string) ([]string, error) {
+	opts := &github.RepositoryListByOrgOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	var names []string
+	for {
+		repos, resp, err := a.rest.Repositories.ListByOrg(ctx, org, opts)
+		if err != nil {
+			return nil, fmt.Errorf("listing repositories for organization %q: %w", org, err)
+		}
+		for _, r := range repos {
+			if r.GetArchived() {
+				continue
+			}
+			names = append(names, r.GetName())
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return names, nil
 }
 
 // DefaultBranch returns the default branch name of the referenced repository.

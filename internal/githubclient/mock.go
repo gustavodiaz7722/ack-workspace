@@ -46,11 +46,20 @@ type Mock struct {
 	// *ForkTimeoutError to simulate the fork never becoming queryable.
 	CreateForkErr error
 
+	// OrgRepos holds the scripted repository names returned by ListOrgRepos,
+	// keyed by organization. A key that is absent yields an empty list.
+	OrgRepos map[string][]string
+
+	// ListOrgReposErr, when non-nil, is returned by ListOrgRepos to simulate a
+	// listing/API failure.
+	ListOrgReposErr error
+
 	// Optional full overrides. When set, they take precedence over the scripted
 	// state above and are still recorded in Calls.
 	RepoExistsFn    func(ctx context.Context, ref RepoRef) (bool, error)
 	DefaultBranchFn func(ctx context.Context, ref RepoRef) (string, error)
 	CreateForkFn    func(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error)
+	ListOrgReposFn  func(ctx context.Context, org string) ([]string, error)
 
 	// Calls records every invocation in order.
 	Calls []Call
@@ -75,10 +84,11 @@ type ExistResult struct {
 
 // Call records a single invocation against the Mock.
 type Call struct {
-	// Method is one of "RepoExists", "DefaultBranch", or "CreateFork".
+	// Method is one of "RepoExists", "DefaultBranch", "CreateFork", or
+	// "ListOrgRepos".
 	Method string
 	// Ref is the repository reference passed to the call. For CreateFork it is
-	// the upstream reference.
+	// the upstream reference; for ListOrgRepos only Ref.Owner (the org) is set.
 	Ref RepoRef
 	// ForkName is the requested fork name; populated for CreateFork only.
 	ForkName string
@@ -198,6 +208,33 @@ func (m *Mock) CreateFork(ctx context.Context, upstream RepoRef, forkName string
 		m.Repos[fork.String()] = existing
 	}
 	return fork, nil
+}
+
+// SetOrgRepos configures the repository names ListOrgRepos returns for org.
+func (m *Mock) SetOrgRepos(org string, names ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.OrgRepos == nil {
+		m.OrgRepos = make(map[string][]string)
+	}
+	m.OrgRepos[org] = append([]string(nil), names...)
+}
+
+// ListOrgRepos records the call and returns the scripted repository names for
+// org (or ListOrgReposErr when set).
+func (m *Mock) ListOrgRepos(ctx context.Context, org string) ([]string, error) {
+	m.record(Call{Method: "ListOrgRepos", Ref: RepoRef{Owner: org}})
+
+	if m.ListOrgReposFn != nil {
+		return m.ListOrgReposFn(ctx, org)
+	}
+	if m.ListOrgReposErr != nil {
+		return nil, m.ListOrgReposErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.OrgRepos[org]...), nil
 }
 
 // record appends a call under the mutex.

@@ -14,7 +14,8 @@ automates it.
 
 - **`init`** — fork, clone, and configure the three core ACK repositories
   (`runtime`, `code-generator`, `test-infra`).
-- **`add`** — fork, clone, and configure one or more service controller repositories.
+- **`add`** — fork, clone, and configure one or more service controller repositories
+  (or every controller in the ACK org with `add all`).
 - **`sync`** — update managed forks from upstream across the whole workspace, using
   fast-forward-only merges so local work is never lost.
 - **`status`** — report the state of every managed repository (branch, dirty flag,
@@ -112,6 +113,21 @@ Accepts a bare service alias or the full `<alias>-controller` form:
 ```bash
 ack-workspace add s3 sns
 ack-workspace add dynamodb-controller
+```
+
+Set up **every** controller in the ACK organization with the special `all` identifier.
+It discovers all `*-controller` repositories in `aws-controllers-k8s` and forks, clones,
+and configures each one (archived repositories are skipped):
+
+```bash
+ack-workspace add all
+```
+
+When `all` is given it supersedes any other identifiers. Pair it with `--dry-run` to see
+the full list first:
+
+```bash
+ack-workspace add all --dry-run
 ```
 
 ### Sync forks with upstream
