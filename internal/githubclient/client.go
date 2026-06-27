@@ -46,6 +46,10 @@ type GitHubClient interface {
 	// given organization, following pagination. Archived repositories are
 	// excluded because they are not useful contributor targets.
 	ListOrgRepos(ctx context.Context, org string) ([]string, error)
+	// DeleteRepo permanently deletes the referenced repository. It is used to
+	// delete a contributor's fork; callers must never pass an upstream
+	// (organization) repository. Requires a token with the delete_repo scope.
+	DeleteRepo(ctx context.Context, ref RepoRef) error
 }
 
 // ForkTimeoutError is returned by CreateFork when a newly requested fork does
@@ -170,6 +174,14 @@ func (a *Adapter) ListOrgRepos(ctx context.Context, org string) ([]string, error
 		opts.Page = resp.NextPage
 	}
 	return names, nil
+}
+
+// DeleteRepo permanently deletes the referenced repository via the GitHub API.
+func (a *Adapter) DeleteRepo(ctx context.Context, ref RepoRef) error {
+	if _, err := a.rest.Repositories.Delete(ctx, ref.Owner, ref.Name); err != nil {
+		return fmt.Errorf("deleting repository %s: %w", ref, err)
+	}
+	return nil
 }
 
 // DefaultBranch returns the default branch name of the referenced repository.

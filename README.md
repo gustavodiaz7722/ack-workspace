@@ -16,6 +16,8 @@ automates it.
   (`runtime`, `code-generator`, `test-infra`, and `ack-dev-skills`).
 - **`add`** — fork, clone, and configure one or more service controller repositories
   (or every controller in the ACK org with `add all`).
+- **`remove`** — delete a controller's local clone and GitHub fork (or every managed
+  controller with `remove all`). Destructive; requires confirmation.
 - **`sync`** — update managed forks from upstream across the whole workspace, using
   fast-forward-only merges so local work is never lost.
 - **`status`** — report the state of every managed repository (branch, dirty flag,
@@ -60,6 +62,7 @@ anything is missing:
 |----------|:-----:|:------------:|:---------------:|
 | `init`   |  yes  |     yes      |       yes       |
 | `add`    |  yes  |     yes      |       yes       |
+| `remove` |  yes  |     yes      |       yes       |
 | `sync`   |  yes  |      no¹     |       no        |
 | `status` |  yes  |      no      |       no        |
 | `config` |  no   |      no      |       no        |
@@ -135,6 +138,34 @@ the full list first:
 
 ```bash
 ack-workspace add all --dry-run
+```
+
+### Remove controllers (destructive)
+
+The inverse of `add`: permanently delete a controller's local clone **and** its GitHub
+fork. Accepts a bare alias or the full form, or `all` to remove every managed controller
+found under the workspace root:
+
+```bash
+ack-workspace remove s3
+ack-workspace remove s3 sns-controller
+ack-workspace remove all
+```
+
+This cannot be undone — a deleted fork is gone for good. Safeguards:
+
+- It only ever deletes a fork owned by **your** GitHub identity; it refuses to touch the
+  upstream `aws-controllers-k8s` organization.
+- You are prompted to type `yes` before anything is deleted. Pass `--yes` to skip the
+  prompt (for scripts).
+- Repositories with uncommitted changes are skipped unless you pass `--force`.
+- `--keep-fork` deletes only the local clone and leaves the fork intact.
+- `--dry-run` previews exactly what would be deleted without touching anything.
+
+```bash
+ack-workspace remove all --dry-run        # preview
+ack-workspace remove s3 --keep-fork        # delete local clone only
+ack-workspace remove s3 --yes --force      # non-interactive, even if dirty
 ```
 
 ### Sync forks with upstream

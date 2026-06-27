@@ -12,6 +12,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -49,6 +50,10 @@ type recorder struct {
 	statusCalled bool
 	statusJSON   bool
 
+	removeCalled bool
+	removeIDs    []string
+	removeOpts   remover.Options
+
 	summary workspace.Summary
 	runErr  error
 }
@@ -76,6 +81,12 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 		statusRun: func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error) {
 			rec.statusCalled = true
 			rec.statusJSON = jsonOut
+			return rec.summary, rec.runErr
+		},
+		removeRun: func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error) {
+			rec.removeCalled = true
+			rec.removeIDs = identifiers
+			rec.removeOpts = opts
 			return rec.summary, rec.runErr
 		},
 	}
@@ -391,7 +402,7 @@ func TestConfigGetMissingIdentityErrors(t *testing.T) {
 // Guard: the root command exposes the expected subcommands.
 func TestRootRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := map[string]bool{"init": false, "add": false, "sync": false, "status": false, "config": false}
+	want := map[string]bool{"init": false, "add": false, "sync": false, "status": false, "remove": false, "config": false}
 	for _, c := range cmd.Commands() {
 		name := strings.Fields(c.Use)[0]
 		if _, ok := want[name]; ok {
@@ -402,5 +413,107 @@ func TestRootRegistersSubcommands(t *testing.T) {
 		if !found {
 			t.Errorf("root command missing subcommand %q", name)
 		}
+	}
+}
+
+// --- remove command ----------------------------------------------------------
+
+// runCmdIn is like runCmd but also wires an input reader so the confirmation
+// prompt can be driven from a test.
+func runCmdIn(t *testing.T, d deps, stdin string, args ...string) (*Result, string, error) {
+	t.Helper()
+	cmd, res := newRootCmd(d)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(stdin))
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return res, out.String(), err
+}
+
+func TestRemove_NeedsGitTokenIdentity(t *testing.T) {
+	isolateEnv(t)
+	chk := &fakeChecker{}
+	rec := &recorder{}
+	// --yes avoids the confirmation prompt so we isolate the prereq wiring.
+	_, _, err := runCmd(t, fakeDeps(chk, rec),
+		"remove", "s3", "--yes", "--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !chk.called {
+		t.Fatal("prerequisite checker was not called")
+	}
+	want := prereq.Need{Git: true, Token: true, Identity: true}
+	if chk.gotNeed != want {
+		t.Errorf("Need = %+v, want %+v", chk.gotNeed, want)
+	}
+	if !rec.removeCalled {
+		t.Error("removeRun was not called")
+	}
+	if len(rec.removeIDs) != 1 || rec.removeIDs[0] != "s3" {
+		t.Errorf("removeRun identifiers = %v, want [s3]", rec.removeIDs)
+	}
+}
+
+func TestRemove_ConfirmationAbortsWithoutYes(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	// User answers "no" at the prompt; the component must not be invoked.
+	_, out, err := runCmdIn(t, fakeDeps(&fakeChecker{}, rec), "no\n",
+		"remove", "s3", "--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if rec.removeCalled {
+		t.Error("removeRun must not be called when the user declines confirmation")
+	}
+	if !strings.Contains(out, "Aborted") {
+		t.Errorf("expected an abort message, got:\n%s", out)
+	}
+}
+
+func TestRemove_ConfirmationProceedsOnYes(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmdIn(t, fakeDeps(&fakeChecker{}, rec), "yes\n",
+		"remove", "s3", "--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.removeCalled {
+		t.Error("removeRun should be called after the user confirms")
+	}
+}
+
+func TestRemove_DryRunSkipsConfirmation(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	// No stdin provided; dry-run must not prompt and must still delegate.
+	_, _, err := runCmdIn(t, fakeDeps(&fakeChecker{}, rec), "",
+		"remove", "s3", "--dry-run", "--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.removeCalled {
+		t.Error("dry-run remove should delegate without a confirmation prompt")
+	}
+}
+
+func TestRemove_ParsesKeepForkAndForce(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"remove", "all", "--yes", "--keep-fork", "--force",
+		"--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.removeOpts.KeepFork || !rec.removeOpts.Force {
+		t.Errorf("expected KeepFork and Force set, got %+v", rec.removeOpts)
+	}
+	if len(rec.removeIDs) != 1 || rec.removeIDs[0] != "all" {
+		t.Errorf("removeRun identifiers = %v, want [all]", rec.removeIDs)
 	}
 }

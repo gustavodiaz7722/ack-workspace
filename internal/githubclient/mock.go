@@ -54,12 +54,17 @@ type Mock struct {
 	// listing/API failure.
 	ListOrgReposErr error
 
+	// DeleteRepoErr, when non-nil, is returned by DeleteRepo to simulate a
+	// delete failure.
+	DeleteRepoErr error
+
 	// Optional full overrides. When set, they take precedence over the scripted
 	// state above and are still recorded in Calls.
 	RepoExistsFn    func(ctx context.Context, ref RepoRef) (bool, error)
 	DefaultBranchFn func(ctx context.Context, ref RepoRef) (string, error)
 	CreateForkFn    func(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error)
 	ListOrgReposFn  func(ctx context.Context, org string) ([]string, error)
+	DeleteRepoFn    func(ctx context.Context, ref RepoRef) error
 
 	// Calls records every invocation in order.
 	Calls []Call
@@ -84,8 +89,8 @@ type ExistResult struct {
 
 // Call records a single invocation against the Mock.
 type Call struct {
-	// Method is one of "RepoExists", "DefaultBranch", "CreateFork", or
-	// "ListOrgRepos".
+	// Method is one of "RepoExists", "DefaultBranch", "CreateFork",
+	// "ListOrgRepos", or "DeleteRepo".
 	Method string
 	// Ref is the repository reference passed to the call. For CreateFork it is
 	// the upstream reference; for ListOrgRepos only Ref.Owner (the org) is set.
@@ -235,6 +240,25 @@ func (m *Mock) ListOrgRepos(ctx context.Context, org string) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.OrgRepos[org]...), nil
+}
+
+// DeleteRepo records the call and, by default, removes the repository from the
+// scripted state so a subsequent RepoExists resolves it as not-found. When
+// DeleteRepoErr is set it is returned without modifying state.
+func (m *Mock) DeleteRepo(ctx context.Context, ref RepoRef) error {
+	m.record(Call{Method: "DeleteRepo", Ref: ref})
+
+	if m.DeleteRepoFn != nil {
+		return m.DeleteRepoFn(ctx, ref)
+	}
+	if m.DeleteRepoErr != nil {
+		return m.DeleteRepoErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.Repos, ref.String())
+	return nil
 }
 
 // record appends a call under the mutex.

@@ -291,3 +291,34 @@ func TestAdapterListOrgReposError(t *testing.T) {
 		t.Fatalf("expected an error, got nil")
 	}
 }
+
+func TestAdapterDeleteRepo(t *testing.T) {
+	ref := RepoRef{Owner: "octocat", Name: "ack-s3-controller"}
+
+	t.Run("success", func(t *testing.T) {
+		var sawDelete bool
+		a := newStubAdapter(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodDelete {
+				sawDelete = true
+				return jsonResp(http.StatusNoContent, ``), nil
+			}
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}))
+		if err := a.DeleteRepo(context.Background(), ref); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !sawDelete {
+			t.Error("expected a DELETE request to be issued")
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		a := newStubAdapter(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return jsonResp(http.StatusForbidden, `{"message":"Must have admin rights"}`), nil
+		}))
+		if err := a.DeleteRepo(context.Background(), ref); err == nil {
+			t.Fatal("expected an error, got nil")
+		}
+	})
+}

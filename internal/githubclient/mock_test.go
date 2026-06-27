@@ -180,3 +180,30 @@ func TestMockListOrgReposError(t *testing.T) {
 		t.Fatal("expected an error, got nil")
 	}
 }
+
+func TestMockDeleteRepo(t *testing.T) {
+	ctx := context.Background()
+	ref := RepoRef{Owner: "octocat", Name: "ack-s3-controller"}
+
+	m := NewMock()
+	m.SetRepo(ref, RepoState{Exists: true})
+
+	if err := m.DeleteRepo(ctx, ref); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// After deletion the repo resolves as not-found.
+	if exists, _ := m.RepoExists(ctx, ref); exists {
+		t.Errorf("expected repo to be gone after DeleteRepo")
+	}
+	if m.CallCount("DeleteRepo") != 1 {
+		t.Errorf("expected 1 DeleteRepo call, got %d", m.CallCount("DeleteRepo"))
+	}
+}
+
+func TestMockDeleteRepoError(t *testing.T) {
+	m := NewMock()
+	m.DeleteRepoErr = errors.New("forbidden")
+	if err := m.DeleteRepo(context.Background(), RepoRef{Owner: "octocat", Name: "x"}); err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+}

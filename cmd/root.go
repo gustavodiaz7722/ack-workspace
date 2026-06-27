@@ -17,6 +17,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/initializer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/inspector"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/syncer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
@@ -112,6 +113,8 @@ type deps struct {
 	// is threaded through so inspector output is directed at the command's
 	// stdout (and is capturable in tests).
 	statusRun func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error)
+	// removeRun runs the Controller_Remover for the remove command.
+	removeRun func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error)
 }
 
 // defaultDeps returns the production wiring: the real prerequisite checker and
@@ -131,6 +134,9 @@ func defaultDeps() deps {
 		},
 		statusRun: func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error) {
 			return inspector.NewWithWriter(out).Status(ctx, a, jsonOut)
+		},
+		removeRun: func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error) {
+			return remover.New().Remove(ctx, a, identifiers, opts)
 		},
 	}
 }
@@ -168,6 +174,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newAddCommand(d, res),
 		newSyncCommand(d, res),
 		newStatusCommand(d, res),
+		newRemoveCommand(d, res),
 		newConfigCommand(),
 	)
 	return cmd, res
