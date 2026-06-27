@@ -153,6 +153,46 @@ func TestRelease_HappyPathPushesAndOpensPR(t *testing.T) {
 	if pr.PullRequest.Base != "main" {
 		t.Errorf("PR base = %q, want main", pr.PullRequest.Base)
 	}
+	if !strings.Contains(pr.PullRequest.Body, "Opened by `ack-workspace release`") {
+		t.Errorf("PR body = %q, want the generated default body", pr.PullRequest.Body)
+	}
+}
+
+func TestRelease_CustomPRBodyOverridesDefault(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+
+	dirtyAfterScript := false
+	mr := &git.MockRunner{ResponseFunc: func(_ string, args []string) (string, error) {
+		switch {
+		case args[0] == "status":
+			if dirtyAfterScript {
+				return " M file", nil
+			}
+			return "", nil
+		case args[0] == "rev-parse":
+			return "", &git.ExitError{Code: 1}
+		default:
+			return "", nil
+		}
+	}}
+	script := &fakeScript{onRun: func() { dirtyAfterScript = true }}
+	gh := githubclient.NewMock()
+
+	const body = "## Custom release notes\n\n- handcrafted"
+	_, err := NewWithScriptRunner(script).Release(
+		context.Background(), appWith(root, mr, gh, false), "ecr",
+		Options{Version: "v1.0.1", PRBody: body})
+	if err != nil {
+		t.Fatalf("Release returned error: %v", err)
+	}
+
+	prCalls := gh.CallsFor("CreatePullRequest")
+	if len(prCalls) != 1 {
+		t.Fatalf("CreatePullRequest called %d times, want 1", len(prCalls))
+	}
+	if got := prCalls[0].PullRequest.Body; got != body {
+		t.Errorf("PR body = %q, want the supplied custom body %q", got, body)
+	}
 }
 
 func TestRelease_SkipPRPushesButDoesNotOpenPR(t *testing.T) {

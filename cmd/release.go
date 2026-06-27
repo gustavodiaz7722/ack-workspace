@@ -13,6 +13,8 @@ const (
 	flagBaseBranch = "base-branch"
 	// flagSkipPR pushes the release branch but does not open a pull request.
 	flagSkipPR = "skip-pr"
+	// flagPRBody overrides the default pull request body.
+	flagPRBody = "pr-body"
 )
 
 // newReleaseCommand builds the `release` subcommand, which cuts a release for a
@@ -40,7 +42,8 @@ func newReleaseCommand(d deps, res *Result) *cobra.Command {
 			"The service may be a bare alias (ecr) or its full form (ecr-controller). The version " +
 			"is normalized to carry a leading 'v' (1.0.1 and v1.0.1 are equivalent). Pass --skip-pr " +
 			"to push the branch without opening a pull request, --base-branch to cut from a branch " +
-			"other than main, and --dry-run to preview the steps without making any change.",
+			"other than main, --pr-body to override the generated pull request body, and --dry-run " +
+			"to preview the steps without making any change.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := d.prepare(cmd, prereq.Need{Git: true, Token: true, Identity: true})
@@ -51,6 +54,7 @@ func newReleaseCommand(d deps, res *Result) *cobra.Command {
 			version, _ := cmd.Flags().GetString(flagVersion)
 			base, _ := cmd.Flags().GetString(flagBaseBranch)
 			skipPR, _ := cmd.Flags().GetBool(flagSkipPR)
+			prBody, _ := cmd.Flags().GetString(flagPRBody)
 
 			// A missing service identifier or version is validated by the
 			// Controller_Releaser (which returns a *releaser.UsageError) so the
@@ -60,7 +64,7 @@ func newReleaseCommand(d deps, res *Result) *cobra.Command {
 				service = args[0]
 			}
 
-			summary, err := d.releaseRun(cmdContext(cmd), a, service, version, base, skipPR)
+			summary, err := d.releaseRun(cmdContext(cmd), a, service, version, base, skipPR, prBody)
 			if err != nil {
 				return err
 			}
@@ -71,5 +75,6 @@ func newReleaseCommand(d deps, res *Result) *cobra.Command {
 	cmd.Flags().String(flagVersion, "", "release version to cut, for example v1.0.1 (required)")
 	cmd.Flags().String(flagBaseBranch, "", "branch to cut the release from (default \"main\")")
 	cmd.Flags().Bool(flagSkipPR, false, "push the release branch but do not open a pull request")
+	cmd.Flags().String(flagPRBody, "", "pull request body to use instead of the generated default")
 	return cmd
 }

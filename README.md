@@ -221,6 +221,7 @@ flags:
 ack-workspace release ecr --version v1.0.1 --dry-run      # preview every step
 ack-workspace release ecr --version v1.0.1 --skip-pr      # push the branch, no PR
 ack-workspace release ecr --version v1.0.1 --base-branch release-1.x
+ack-workspace release ecr --version v1.0.1 --pr-body "$(cat notes.md)"   # custom PR body
 ```
 
 Built-in safety: a controller with uncommitted changes is skipped, a base branch that has

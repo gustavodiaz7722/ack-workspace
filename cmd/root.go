@@ -117,7 +117,7 @@ type deps struct {
 	// removeRun runs the Controller_Remover for the remove command.
 	removeRun func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error)
 	// releaseRun runs the Controller_Releaser for the release command.
-	releaseRun func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool) (workspace.Summary, error)
+	releaseRun func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool, prBody string) (workspace.Summary, error)
 }
 
 // defaultDeps returns the production wiring: the real prerequisite checker and
@@ -141,11 +141,12 @@ func defaultDeps() deps {
 		removeRun: func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error) {
 			return remover.New().Remove(ctx, a, identifiers, opts)
 		},
-		releaseRun: func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool) (workspace.Summary, error) {
+		releaseRun: func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool, prBody string) (workspace.Summary, error) {
 			return releaser.New().Release(ctx, a, service, releaser.Options{
 				Version:    version,
 				BaseBranch: baseBranch,
 				SkipPR:     skipPR,
+				PRBody:     prBody,
 			})
 		},
 	}

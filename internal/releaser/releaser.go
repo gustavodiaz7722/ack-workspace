@@ -91,6 +91,9 @@ type Options struct {
 	// SkipPR, when true, pushes the release branch to the fork but does not open
 	// a pull request against upstream.
 	SkipPR bool
+	// PRBody, when non-empty, overrides the default pull request body. It is
+	// ignored when SkipPR is true.
+	PRBody string
 }
 
 // Releaser implements the Controller_Releaser.
@@ -244,7 +247,7 @@ func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base
 	if opts.SkipPR {
 		return released(name, fmt.Sprintf("released %s; pushed %q to %s (PR skipped)", version, branch, originRemote))
 	}
-	prURL, err := r.openPullRequest(ctx, ap, name, branch, base, version)
+	prURL, err := r.openPullRequest(ctx, ap, name, branch, base, version, opts.PRBody)
 	if err != nil {
 		return failed(name, fmt.Errorf("opening pull request: %w", err))
 	}
@@ -252,17 +255,27 @@ func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base
 }
 
 // openPullRequest opens the upstream PR from the contributor's release branch
-// and returns its URL.
-func (r *Releaser) openPullRequest(ctx context.Context, ap app.App, name, branch, base, version string) (string, error) {
+// and returns its URL. When body is non-empty it overrides the default,
+// generated PR body.
+func (r *Releaser) openPullRequest(ctx context.Context, ap app.App, name, branch, base, version, body string) (string, error) {
+	if strings.TrimSpace(body) == "" {
+		body = defaultPRBody(name, version)
+	}
 	upstreamRef := githubclient.RepoRef{Owner: upstreamOwner, Name: name}
 	return ap.GitHub.CreatePullRequest(ctx, upstreamRef, githubclient.NewPullRequest{
 		Title: commitMessage(version),
-		Body: fmt.Sprintf(
-			"Release artifacts for `%s` version `%s`.\n\nOpened by `ack-workspace release`.",
-			name, version),
-		Head: ap.Config.GitHubUser + ":" + branch,
-		Base: base,
+		Body:  body,
+		Head:  ap.Config.GitHubUser + ":" + branch,
+		Base:  base,
 	})
+}
+
+// defaultPRBody builds the generated pull request body used when the caller does
+// not supply one.
+func defaultPRBody(name, version string) string {
+	return fmt.Sprintf(
+		"Release artifacts for `%s` version `%s`.\n\nOpened by `ack-workspace release`.",
+		name, version)
 }
 
 // preview computes the release steps for a dry-run without mutating anything.

@@ -60,6 +60,7 @@ type recorder struct {
 	releaseVersion string
 	releaseBase    string
 	releaseSkipPR  bool
+	releasePRBody  string
 
 	summary workspace.Summary
 	runErr  error
@@ -96,12 +97,13 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 			rec.removeOpts = opts
 			return rec.summary, rec.runErr
 		},
-		releaseRun: func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool) (workspace.Summary, error) {
+		releaseRun: func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool, prBody string) (workspace.Summary, error) {
 			rec.releaseCalled = true
 			rec.releaseService = service
 			rec.releaseVersion = version
 			rec.releaseBase = baseBranch
 			rec.releaseSkipPR = skipPR
+			rec.releasePRBody = prBody
 			return rec.summary, rec.runErr
 		},
 	}
@@ -559,6 +561,7 @@ func TestRelease_ParsesServiceAndFlags(t *testing.T) {
 	rec := &recorder{}
 	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
 		"release", "ecr-controller", "--version", "v1.2.0", "--base-branch", "release-1.x", "--skip-pr",
+		"--pr-body", "custom body",
 		"--"+config.FlagGitHubUser, "octocat", "--"+config.FlagToken, "tok")
 	if err != nil {
 		t.Fatalf("execute returned error: %v", err)
@@ -577,6 +580,9 @@ func TestRelease_ParsesServiceAndFlags(t *testing.T) {
 	}
 	if !rec.releaseSkipPR {
 		t.Error("skipPR = false, want true")
+	}
+	if rec.releasePRBody != "custom body" {
+		t.Errorf("pr body = %q, want \"custom body\"", rec.releasePRBody)
 	}
 }
 
