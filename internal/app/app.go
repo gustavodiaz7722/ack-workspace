@@ -2,7 +2,7 @@
 // clients shared by every ack-workspace command.
 //
 // The App struct lives in this neutral internal package rather than in cmd so
-// that the feature components (initializer, adder, syncer, inspector) can accept
+// that the feature components (initializer, adder, refresher, inspector) can accept
 // an App without importing the cmd package, which would create an import cycle
 // (cmd imports the components, and the components would import cmd). The cmd
 // layer constructs the App in cmd/root.go and passes it down to each component.

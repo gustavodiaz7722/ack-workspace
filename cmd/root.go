@@ -17,9 +17,9 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/initializer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/inspector"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/refresher"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
-	"github.com/aws-controllers-k8s/ack-workspace/internal/syncer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -49,7 +49,7 @@ func (e *UsageError) Error() string { return e.Msg }
 // the process entrypoint (main.go, Task 13.3) so the entrypoint can render the
 // summary and derive the exit code.
 //
-// The batch commands (init, add, sync) and the read-only status command stash
+// The batch commands (init, add, refresh) and the read-only status command stash
 // the workspace.Summary they produced via set; the config command produces no
 // summary and leaves the Result empty. main.go obtains the Result from Execute
 // and applies the exit-code policy: non-zero on a pre-flight/usage error (the
@@ -73,8 +73,8 @@ func (r *Result) set(s workspace.Summary) {
 
 // setLabeled records the Summary together with the label the renderer should use
 // for the OutcomeCreated bucket. The add command passes "added" (Requirement
-// 4.9) and the sync command passes "updated" so the human summary reads in the
-// command's own terms.
+// 4.9) and the refresh command passes "refreshed" so the human summary reads in
+// the command's own terms.
 func (r *Result) setLabeled(s workspace.Summary, createdLabel string) {
 	r.summary = s
 	r.hasSummary = true
@@ -108,8 +108,8 @@ type deps struct {
 	initRun func(ctx context.Context, a app.App) (workspace.Summary, error)
 	// addRun runs the Controller_Adder for the add command.
 	addRun func(ctx context.Context, a app.App, identifiers []string) (workspace.Summary, error)
-	// syncRun runs the Fork_Synchronizer for the sync command.
-	syncRun func(ctx context.Context, a app.App, only []string, push bool) (workspace.Summary, error)
+	// refreshRun runs the Workspace_Refresher for the refresh command.
+	refreshRun func(ctx context.Context, a app.App, only []string) (workspace.Summary, error)
 	// statusRun runs the Workspace_Inspector for the status command. The writer
 	// is threaded through so inspector output is directed at the command's
 	// stdout (and is capturable in tests).
@@ -132,8 +132,8 @@ func defaultDeps() deps {
 		addRun: func(ctx context.Context, a app.App, identifiers []string) (workspace.Summary, error) {
 			return adder.New().Add(ctx, a, identifiers)
 		},
-		syncRun: func(ctx context.Context, a app.App, only []string, push bool) (workspace.Summary, error) {
-			return syncer.New().Sync(ctx, a, only, push)
+		refreshRun: func(ctx context.Context, a app.App, only []string) (workspace.Summary, error) {
+			return refresher.New().Refresh(ctx, a, only)
 		},
 		statusRun: func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error) {
 			return inspector.NewWithWriter(out).Status(ctx, a, jsonOut)
@@ -153,8 +153,8 @@ func defaultDeps() deps {
 }
 
 // NewRootCommand builds the ack-workspace root command, registers the persistent
-// flags shared by every subcommand, and attaches the init/add/sync/status/config
-// subcommands wired to the production components.
+// flags shared by every subcommand, and attaches the
+// init/add/refresh/status/config subcommands wired to the production components.
 func NewRootCommand() *cobra.Command {
 	cmd, _ := newRootCmd(defaultDeps())
 	return cmd
@@ -183,7 +183,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 	cmd.AddCommand(
 		newInitCommand(d, res),
 		newAddCommand(d, res),
-		newSyncCommand(d, res),
+		newRefreshCommand(d, res),
 		newStatusCommand(d, res),
 		newRemoveCommand(d, res),
 		newReleaseCommand(d, res),

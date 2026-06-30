@@ -66,6 +66,10 @@ type Mock struct {
 	// simulate a PR-creation failure.
 	CreatePullRequestErr error
 
+	// SyncForkErr, when non-nil, is returned by SyncFork to simulate a sync
+	// failure (for example a *ForkDivergedError).
+	SyncForkErr error
+
 	// Optional full overrides. When set, they take precedence over the scripted
 	// state above and are still recorded in Calls.
 	RepoExistsFn        func(ctx context.Context, ref RepoRef) (bool, error)
@@ -74,6 +78,7 @@ type Mock struct {
 	ListOrgReposFn      func(ctx context.Context, org string) ([]string, error)
 	DeleteRepoFn        func(ctx context.Context, ref RepoRef) error
 	CreatePullRequestFn func(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error)
+	SyncForkFn          func(ctx context.Context, fork RepoRef, branch string) error
 
 	// Calls records every invocation in order.
 	Calls []Call
@@ -99,17 +104,19 @@ type ExistResult struct {
 // Call records a single invocation against the Mock.
 type Call struct {
 	// Method is one of "RepoExists", "DefaultBranch", "CreateFork",
-	// "ListOrgRepos", "DeleteRepo", or "CreatePullRequest".
+	// "ListOrgRepos", "DeleteRepo", "CreatePullRequest", or "SyncFork".
 	Method string
 	// Ref is the repository reference passed to the call. For CreateFork and
-	// CreatePullRequest it is the upstream reference; for ListOrgRepos only
-	// Ref.Owner (the org) is set.
+	// CreatePullRequest it is the upstream reference; for SyncFork it is the
+	// fork reference; for ListOrgRepos only Ref.Owner (the org) is set.
 	Ref RepoRef
 	// ForkName is the requested fork name; populated for CreateFork only.
 	ForkName string
 	// PullRequest is the pull request input; populated for CreatePullRequest
 	// only.
 	PullRequest NewPullRequest
+	// Branch is the branch argument; populated for SyncFork only.
+	Branch string
 }
 
 // Ensure the mock satisfies the interface at compile time.
@@ -290,6 +297,17 @@ func (m *Mock) CreatePullRequest(ctx context.Context, upstream RepoRef, in NewPu
 		return m.PullRequestURL, nil
 	}
 	return "https://github.com/" + upstream.String() + "/pull/1", nil
+}
+
+// SyncFork records the call and returns SyncForkErr when set (otherwise nil),
+// simulating a server-side fork sync from upstream.
+func (m *Mock) SyncFork(ctx context.Context, fork RepoRef, branch string) error {
+	m.record(Call{Method: "SyncFork", Ref: fork, Branch: branch})
+
+	if m.SyncForkFn != nil {
+		return m.SyncForkFn(ctx, fork, branch)
+	}
+	return m.SyncForkErr
 }
 
 // record appends a call under the mutex.

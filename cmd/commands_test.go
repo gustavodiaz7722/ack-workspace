@@ -44,9 +44,8 @@ type recorder struct {
 	addCalled bool
 	addIDs    []string
 
-	syncCalled bool
-	syncOnly   []string
-	syncPush   bool
+	refreshCalled bool
+	refreshOnly   []string
 
 	statusCalled bool
 	statusJSON   bool
@@ -80,10 +79,9 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 			rec.addIDs = identifiers
 			return rec.summary, rec.runErr
 		},
-		syncRun: func(ctx context.Context, a app.App, only []string, push bool) (workspace.Summary, error) {
-			rec.syncCalled = true
-			rec.syncOnly = only
-			rec.syncPush = push
+		refreshRun: func(ctx context.Context, a app.App, only []string) (workspace.Summary, error) {
+			rec.refreshCalled = true
+			rec.refreshOnly = only
 			return rec.summary, rec.runErr
 		},
 		statusRun: func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error) {
@@ -153,9 +151,9 @@ func TestPrerequisiteNeedPerCommand(t *testing.T) {
 			want: prereq.Need{Git: true, Token: true, Identity: true},
 		},
 		{
-			name: "sync needs git only",
-			args: []string{"sync", "--" + config.FlagGitHubUser, "octocat"},
-			want: prereq.Need{Git: true},
+			name: "refresh needs git+token+identity",
+			args: []string{"refresh", "--yes", "--" + config.FlagGitHubUser, "octocat", "--" + config.FlagToken, "tok"},
+			want: prereq.Need{Git: true, Token: true, Identity: true},
 		},
 		{
 			name: "status needs git only",
@@ -212,7 +210,7 @@ func TestFailingPrerequisiteStopsDelegation(t *testing.T) {
 	}{
 		{"init", []string{"init", "--" + config.FlagGitHubUser, "octocat", "--" + config.FlagToken, "tok"}, func(r *recorder) bool { return r.initCalled }},
 		{"add", []string{"add", "s3", "--" + config.FlagGitHubUser, "octocat", "--" + config.FlagToken, "tok"}, func(r *recorder) bool { return r.addCalled }},
-		{"sync", []string{"sync", "--" + config.FlagGitHubUser, "octocat"}, func(r *recorder) bool { return r.syncCalled }},
+		{"refresh", []string{"refresh", "--yes", "--" + config.FlagGitHubUser, "octocat", "--" + config.FlagToken, "tok"}, func(r *recorder) bool { return r.refreshCalled }},
 		{"status", []string{"status", "--" + config.FlagGitHubUser, "octocat"}, func(r *recorder) bool { return r.statusCalled }},
 	}
 
@@ -303,41 +301,65 @@ func TestAddEmptyIdentifierListSurfacesUsageError(t *testing.T) {
 	}
 }
 
-func TestSyncParsesSubsetAndPushFlag(t *testing.T) {
-	t.Run("subset with push", func(t *testing.T) {
+func TestRefreshParsesSubsetWithConfirmation(t *testing.T) {
+	t.Run("subset confirmed", func(t *testing.T) {
 		isolateEnv(t)
-		chk := &fakeChecker{}
 		rec := &recorder{}
-		if _, _, err := runCmd(t, fakeDeps(chk, rec),
-			"sync", "runtime", "s3-controller", "--push", "--"+config.FlagGitHubUser, "octocat"); err != nil {
+		if _, _, err := runCmdIn(t, fakeDeps(&fakeChecker{}, rec), "yes\n",
+			"refresh", "runtime", "s3-controller", "--"+config.FlagGitHubUser, "octocat"); err != nil {
 			t.Fatalf("execute returned error: %v", err)
 		}
-		if !rec.syncCalled {
-			t.Fatal("syncRun was not called")
+		if !rec.refreshCalled {
+			t.Fatal("refreshRun was not called")
 		}
-		if !rec.syncPush {
-			t.Error("syncRun push = false, want true")
-		}
-		if len(rec.syncOnly) != 2 || rec.syncOnly[0] != "runtime" || rec.syncOnly[1] != "s3-controller" {
-			t.Errorf("syncRun only = %v, want [runtime s3-controller]", rec.syncOnly)
+		if len(rec.refreshOnly) != 2 || rec.refreshOnly[0] != "runtime" || rec.refreshOnly[1] != "s3-controller" {
+			t.Errorf("refreshRun only = %v, want [runtime s3-controller]", rec.refreshOnly)
 		}
 	})
 
-	t.Run("no args means all and no push", func(t *testing.T) {
+	t.Run("no args means all", func(t *testing.T) {
 		isolateEnv(t)
-		chk := &fakeChecker{}
 		rec := &recorder{}
-		if _, _, err := runCmd(t, fakeDeps(chk, rec),
-			"sync", "--"+config.FlagGitHubUser, "octocat"); err != nil {
+		if _, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+			"refresh", "--yes", "--"+config.FlagGitHubUser, "octocat"); err != nil {
 			t.Fatalf("execute returned error: %v", err)
 		}
-		if rec.syncPush {
-			t.Error("syncRun push = true, want false by default")
+		if !rec.refreshCalled {
+			t.Fatal("refreshRun was not called")
 		}
-		if len(rec.syncOnly) != 0 {
-			t.Errorf("syncRun only = %v, want empty", rec.syncOnly)
+		if len(rec.refreshOnly) != 0 {
+			t.Errorf("refreshRun only = %v, want empty", rec.refreshOnly)
 		}
 	})
+}
+
+func TestRefreshAbortsWhenNotConfirmed(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, out, err := runCmdIn(t, fakeDeps(&fakeChecker{}, rec), "no\n",
+		"refresh", "--"+config.FlagGitHubUser, "octocat")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if rec.refreshCalled {
+		t.Error("refreshRun must not be called when the user declines")
+	}
+	if !strings.Contains(out, "Aborted") {
+		t.Errorf("expected an abort message, got %q", out)
+	}
+}
+
+func TestRefreshDryRunDoesNotPrompt(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	// No stdin provided; dry-run must not prompt and must still delegate.
+	if _, _, err := runCmdIn(t, fakeDeps(&fakeChecker{}, rec), "",
+		"refresh", "--dry-run", "--"+config.FlagGitHubUser, "octocat"); err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.refreshCalled {
+		t.Fatal("refreshRun was not called in dry-run")
+	}
 }
 
 func TestStatusParsesJSONFlag(t *testing.T) {
@@ -419,7 +441,7 @@ func TestConfigGetMissingIdentityErrors(t *testing.T) {
 // Guard: the root command exposes the expected subcommands.
 func TestRootRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := map[string]bool{"init": false, "add": false, "sync": false, "status": false, "remove": false, "release": false, "config": false}
+	want := map[string]bool{"init": false, "add": false, "refresh": false, "status": false, "remove": false, "release": false, "config": false}
 	for _, c := range cmd.Commands() {
 		name := strings.Fields(c.Use)[0]
 		if _, ok := want[name]; ok {

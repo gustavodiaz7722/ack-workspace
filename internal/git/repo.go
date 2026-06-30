@@ -10,7 +10,7 @@ import (
 )
 
 // Repo composes a Runner into the high-level git operations the feature
-// components (initializer, adder, syncer, inspector) need. It binds a single
+// components (initializer, adder, refresher, inspector) need. It binds a single
 // on-disk repository (Path) to the Runner that executes git within it, so
 // callers can build a Repo around an existing checkout with an injected Runner
 // (real or mock) and drive clone/remote/fetch/compare/fast-forward/push flows.
@@ -220,6 +220,52 @@ func (r *Repo) FastForward(ctx context.Context, branch, upstreamRef string) erro
 	}
 	if _, err := r.runner.Run(ctx, r.Path, "merge", "--ff-only", upstreamRef); err != nil {
 		return fmt.Errorf("fast-forward %q to %s: %w", branch, upstreamRef, err)
+	}
+	return nil
+}
+
+// FetchWithTags runs `git fetch <remote> --tags` to update remote-tracking refs
+// and download all tags from the remote, without touching the working tree or
+// local branches. It is used to ensure every upstream tag is present on the
+// local copy.
+func (r *Repo) FetchWithTags(ctx context.Context, remote string) error {
+	if _, err := r.runner.Run(ctx, r.Path, "fetch", remote, "--tags"); err != nil {
+		return fmt.Errorf("fetch %q --tags: %w", remote, err)
+	}
+	return nil
+}
+
+// ResetHard discards all uncommitted changes to tracked files by running
+// `git reset --hard`, returning the working tree and index to the current
+// branch's HEAD. It is a destructive operation: staged and unstaged
+// modifications to tracked files are lost. Untracked files are not touched by
+// reset; use Clean to remove those as well.
+func (r *Repo) ResetHard(ctx context.Context) error {
+	if _, err := r.runner.Run(ctx, r.Path, "reset", "--hard"); err != nil {
+		return fmt.Errorf("reset --hard: %w", err)
+	}
+	return nil
+}
+
+// ResetHardTo resets the current branch, the index, and the working tree to ref
+// by running `git reset --hard <ref>`. It is destructive: any commits on the
+// current branch not reachable from ref are dropped from the branch, and local
+// modifications are discarded. It is used to force the checked-out default
+// branch to match the upstream ref exactly.
+func (r *Repo) ResetHardTo(ctx context.Context, ref string) error {
+	if _, err := r.runner.Run(ctx, r.Path, "reset", "--hard", ref); err != nil {
+		return fmt.Errorf("reset --hard %s: %w", ref, err)
+	}
+	return nil
+}
+
+// Clean removes untracked files and directories by running `git clean -fd`
+// (force, including directories). It is destructive: untracked content that is
+// not ignored is deleted. Together with ResetHard it returns the working tree to
+// a pristine state so a branch switch cannot be blocked by local changes.
+func (r *Repo) Clean(ctx context.Context) error {
+	if _, err := r.runner.Run(ctx, r.Path, "clean", "-fd"); err != nil {
+		return fmt.Errorf("clean -fd: %w", err)
 	}
 	return nil
 }

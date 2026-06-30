@@ -54,6 +54,12 @@ type GitHubClient interface {
 	// returns the URL of the created PR. For a cross-fork PR the in.Head field
 	// must be namespaced as "<fork-owner>:<branch>".
 	CreatePullRequest(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error)
+	// SyncFork updates the given branch of the fork (fork) from its upstream
+	// repository server-side, equivalent to the "Sync fork" button in the GitHub
+	// UI. It returns a *ForkDivergedError when the branch cannot be synced
+	// because it has diverged from upstream (the API responds 409), so callers
+	// can report a clear, actionable result rather than a generic error.
+	SyncFork(ctx context.Context, fork RepoRef, branch string) error
 }
 
 // NewPullRequest describes the pull request CreatePullRequest opens.
@@ -81,6 +87,21 @@ type ForkTimeoutError struct {
 
 func (e *ForkTimeoutError) Error() string {
 	return fmt.Sprintf("timed out after %s waiting for fork %s to become available", e.Waited, e.Fork)
+}
+
+// ForkDivergedError is returned by SyncFork when the fork branch cannot be
+// synced from upstream because the two histories have diverged (the GitHub API
+// responds with 409 Conflict). The fork's branch must be reconciled manually
+// before it can be synced.
+type ForkDivergedError struct {
+	// Fork is the fork repository whose branch could not be synced.
+	Fork RepoRef
+	// Branch is the branch that could not be synced.
+	Branch string
+}
+
+func (e *ForkDivergedError) Error() string {
+	return fmt.Sprintf("fork %s branch %q has diverged from upstream and cannot be synced automatically", e.Fork, e.Branch)
 }
 
 const (
@@ -215,6 +236,23 @@ func (a *Adapter) CreatePullRequest(ctx context.Context, upstream RepoRef, in Ne
 		return "", fmt.Errorf("creating pull request on %s: %w", upstream, err)
 	}
 	return pr.GetHTMLURL(), nil
+}
+
+// SyncFork syncs branch of the fork from its upstream repository using the
+// GitHub "merge-upstream" API. A 409 Conflict (the branch has diverged from
+// upstream) is mapped to a *ForkDivergedError so callers can report it
+// distinctly from a transport or API failure.
+func (a *Adapter) SyncFork(ctx context.Context, fork RepoRef, branch string) error {
+	_, resp, err := a.rest.Repositories.MergeUpstream(ctx, fork.Owner, fork.Name, &github.RepoMergeUpstreamRequest{
+		Branch: github.String(branch),
+	})
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusConflict {
+			return &ForkDivergedError{Fork: fork, Branch: branch}
+		}
+		return fmt.Errorf("syncing fork %s branch %q from upstream: %w", fork, branch, err)
+	}
+	return nil
 }
 
 // DefaultBranch returns the default branch name of the referenced repository.

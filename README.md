@@ -18,8 +18,9 @@ automates it.
   (or every controller in the ACK org with `add all`).
 - **`remove`** — delete a controller's local clone and GitHub fork (or every managed
   controller with `remove all`). Destructive; requires confirmation.
-- **`sync`** — update managed forks from upstream across the whole workspace, using
-  fast-forward-only merges so local work is never lost.
+- **`refresh`** — reconcile managed repositories to a clean, up-to-date baseline ready for
+  development: sync the fork from upstream, fetch all upstream tags, check out `main`, and
+  reset `main` to match upstream. Destructive; requires confirmation.
 - **`release`** — cut a release for a single service controller: update its base branch
   from upstream, create a `release-<version>` branch, regenerate the release artifacts,
   commit and push them to your fork, and open a pull request against upstream.
@@ -29,8 +30,9 @@ automates it.
 
 Built-in safety:
 
-- **Never destroys local work** — sync is fast-forward-only and skips dirty or diverged
-  repositories.
+- **Destructive commands confirm first** — `refresh` and `remove` discard local state, so
+  they require an interactive confirmation (or `--yes`); work committed on other branches
+  is left intact.
 - **`--dry-run`** — preview exactly what every command would do without touching GitHub,
   git, or the filesystem.
 - **Resilient & concurrent** — repositories are processed in parallel with a bounded
@@ -67,14 +69,14 @@ anything is missing:
 | `add`    |  yes  |     yes      |       yes       |
 | `remove` |  yes  |     yes      |       yes       |
 | `release`|  yes  |     yes¹     |       yes       |
-| `sync`   |  yes  |      no²     |       no        |
+| `refresh`|  yes  |     yes²     |       yes       |
 | `status` |  yes  |      no      |       no        |
 | `config` |  no   |      no      |       no        |
 
 ¹ `release` needs a token to open the upstream pull request and your identity to name the
 fork branch; pass `--skip-pr` to push the release branch without opening a PR.
 
-² `sync` uses git remotes (which carry their own credentials), not the GitHub API.
+² `refresh` needs a token and identity to sync your fork from upstream via the GitHub API.
 
 Provide a GitHub token via the `--token` flag or the `GITHUB_TOKEN` environment variable.
 The token is **never** written to the config file.
@@ -175,23 +177,30 @@ ack-workspace remove s3 --keep-fork        # delete local clone only
 ack-workspace remove s3 --yes --force      # non-interactive, even if dirty
 ```
 
-### Sync forks with upstream
+### Refresh repositories for development (destructive)
 
-Update every managed repository (fast-forward only):
+Reconcile every managed repository to a known-good baseline ready for development. For
+each repository `refresh`:
+
+1. syncs your fork's `main` from upstream server-side (GitHub merge-upstream),
+2. fetches all upstream tags into the local copy,
+3. discards uncommitted changes and untracked files,
+4. checks out `main`, and
+5. resets `main` to exactly match upstream (and therefore your fork).
 
 ```bash
-ack-workspace sync
+ack-workspace refresh                          # all repositories (prompts for confirmation)
+ack-workspace refresh runtime s3-controller    # a subset
+ack-workspace refresh --dry-run                # preview; touches nothing
+ack-workspace refresh --yes                    # skip the confirmation prompt
 ```
 
-Sync a subset, and push the updated branches to your fork:
+The end state per repository is: `main` checked out, your fork's `main` up to date with
+upstream, the local `main` up to date with both, and every upstream tag present locally.
 
-```bash
-ack-workspace sync runtime s3-controller --push
-```
-
-Repositories with uncommitted changes are skipped ("uncommitted changes") and
-repositories whose history has diverged are skipped ("diverged history"); their local
-branches are left untouched.
+This permanently discards uncommitted changes and untracked files and resets a diverged
+local `main`, so it asks for confirmation unless `--dry-run` or `--yes` is given. Work
+committed on other branches is left intact.
 
 ### Cut a controller release
 
@@ -242,7 +251,7 @@ Add `--dry-run` to see what would happen without making any change:
 
 ```bash
 ack-workspace init --dry-run
-ack-workspace sync --dry-run
+ack-workspace refresh --dry-run
 ```
 
 ## Exit codes
