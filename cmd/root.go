@@ -20,6 +20,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/refresher"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/scanner"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -118,6 +119,11 @@ type deps struct {
 	removeRun func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error)
 	// releaseRun runs the Controller_Releaser for the release command.
 	releaseRun func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool, prBody string) (workspace.Summary, error)
+	// scanRun runs the scanner for the scan command. It constructs the Bedrock
+	// model client (from the given region and model), directs the scanner's
+	// findings at out, and (when debugOut is non-nil) its conversation transcript
+	// at debugOut.
+	scanRun func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error)
 }
 
 // defaultDeps returns the production wiring: the real prerequisite checker and
@@ -148,6 +154,17 @@ func defaultDeps() deps {
 				SkipPR:     skipPR,
 				PRBody:     prBody,
 			})
+		},
+		scanRun: func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error) {
+			client, err := scanner.NewBedrockClient(ctx, region, model)
+			if err != nil {
+				return workspace.Summary{}, err
+			}
+			s := scanner.NewWithWriterToken(client, out, a.Config.Token)
+			if debugOut != nil {
+				s.SetTraceWriter(debugOut)
+			}
+			return s.Scan(ctx, a, opts)
 		},
 	}
 }
@@ -187,6 +204,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newStatusCommand(d, res),
 		newRemoveCommand(d, res),
 		newReleaseCommand(d, res),
+		newScanCommand(d, res),
 		newConfigCommand(),
 	)
 	return cmd, res

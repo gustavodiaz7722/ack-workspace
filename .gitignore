@@ -8,6 +8,9 @@ ack-workspace.exe
 /build/
 /dist/
 
+# scan debug transcripts
+*-scan-debug.log
+
 # Go workspace file
 go.work
 go.work.sum

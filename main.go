@@ -19,6 +19,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/adder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/cli"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/scanner"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -118,12 +119,15 @@ func exitCodeFor(summary workspace.Summary, hasSummary bool, err error) int {
 
 // isUsageError reports whether err is (or wraps) one of the tool's typed usage
 // errors: a *cmd.UsageError (invalid concurrency and other root validation), a
-// *adder.UsageError (the empty add identifier list), or a *releaser.UsageError
-// (a missing service identifier or invalid release version). These map to a
+// *adder.UsageError (the empty add identifier list), a *releaser.UsageError
+// (a missing service identifier or invalid release version), or a
+// *scanner.UsageError (an unknown or unparsable issue selector). These map to a
 // distinct exit code from runtime failures.
 func isUsageError(err error) bool {
 	var cmdUsage *cmd.UsageError
 	var adderUsage *adder.UsageError
 	var releaserUsage *releaser.UsageError
-	return errors.As(err, &cmdUsage) || errors.As(err, &adderUsage) || errors.As(err, &releaserUsage)
+	var scannerUsage *scanner.UsageError
+	return errors.As(err, &cmdUsage) || errors.As(err, &adderUsage) ||
+		errors.As(err, &releaserUsage) || errors.As(err, &scannerUsage)
 }
