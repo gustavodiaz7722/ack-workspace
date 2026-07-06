@@ -2,6 +2,7 @@ package githubclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -137,6 +138,21 @@ func TestAdapterCreateForkSuccess(t *testing.T) {
 	rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/forks"):
+			// The fork must be created with default_branch_only so no upstream
+			// branches or tags are copied into the fork.
+			var body struct {
+				Name              string `json:"name"`
+				DefaultBranchOnly bool   `json:"default_branch_only"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding fork request body: %v", err)
+			}
+			if !body.DefaultBranchOnly {
+				t.Errorf("fork request default_branch_only = false, want true")
+			}
+			if body.Name != forkName {
+				t.Errorf("fork request name = %q, want %q", body.Name, forkName)
+			}
 			// Fork request accepted; return the new repository's metadata.
 			return jsonResp(http.StatusOK, `{"name":"ack-runtime","owner":{"login":"octocat"}}`), nil
 		case r.Method == http.MethodGet:

@@ -36,8 +36,11 @@ type GitHubClient interface {
 	// (for example, "main").
 	DefaultBranch(ctx context.Context, ref RepoRef) (string, error)
 	// CreateFork forks upstream into the authenticated user's account, renaming
-	// the fork to forkName when it is non-empty. Because GitHub creates forks
-	// asynchronously, CreateFork polls until the fork is queryable and returns a
+	// the fork to forkName when it is non-empty. The fork is created with
+	// default_branch_only, so only the upstream default branch is copied and no
+	// other branches or tags are carried into the fork. Because GitHub creates
+	// forks asynchronously, CreateFork polls until the fork is queryable and
+	// returns a
 	// *ForkTimeoutError if the fork does not become available within the
 	// configured timeout, so callers can record the repository as failed rather
 	// than surfacing a clone error.
@@ -267,7 +270,11 @@ func (a *Adapter) DefaultBranch(ctx context.Context, ref RepoRef) (string, error
 // CreateFork issues the fork request and then polls for the fork to become
 // queryable, returning a *ForkTimeoutError if it does not appear in time.
 func (a *Adapter) CreateFork(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error) {
-	opts := &github.RepositoryCreateForkOptions{}
+	// DefaultBranchOnly copies only the upstream default branch into the fork;
+	// no other branches or tags are copied. This keeps the fork clean of
+	// upstream release tags (which would otherwise be frozen at fork-creation
+	// time and never sync), so tags live only on upstream and the local clone.
+	opts := &github.RepositoryCreateForkOptions{DefaultBranchOnly: true}
 	if forkName != "" {
 		opts.Name = forkName
 	}
