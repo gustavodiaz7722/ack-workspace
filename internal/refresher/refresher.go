@@ -16,6 +16,8 @@ import (
 const (
 	// upstreamRemote points at the canonical ACK organization repository.
 	upstreamRemote = "upstream"
+	// originRemote points at the contributor's fork.
+	originRemote = "origin"
 	// defaultBranch is the branch the refresher checks out and reconciles. ACK
 	// repositories use "main" as their default branch.
 	defaultBranch = "main"
@@ -121,6 +123,10 @@ func selectRepos(discovered, only []string) (toProcess, invalid []string) {
 //  4. Checkout switches to the default branch.
 //  5. ResetHardTo forces the local default branch to exactly match upstream
 //     (and therefore the freshly synced fork).
+//  6. Fetch origin updates the fork's remote-tracking ref (origin/main) so it
+//     reflects the server-side sync from step 1. Without this the local
+//     origin/main ref stays stale and `git status` misreports the branch as
+//     ahead of the fork even though both point at the same commit.
 func (r *Refresher) process(ctx context.Context, a app.App, path, name string) workspace.Result {
 	repo := git.NewRepo(path, a.Git)
 
@@ -135,8 +141,8 @@ func (r *Refresher) process(ctx context.Context, a app.App, path, name string) w
 			Repo:    name,
 			Outcome: workspace.OutcomeCreated,
 			Reason: fmt.Sprintf(
-				"would sync fork %s from upstream, fetch tags, discard local changes, and reset %s to %s",
-				fork, defaultBranch, upstreamRef()),
+				"would sync fork %s from upstream, fetch tags, discard local changes, reset %s to %s, and fetch %s",
+				fork, defaultBranch, upstreamRef(), originRemote),
 		}
 	}
 
@@ -164,6 +170,12 @@ func (r *Refresher) process(ctx context.Context, a app.App, path, name string) w
 	// 5. Force the local default branch to exactly match upstream (== fork).
 	if err := repo.ResetHardTo(ctx, upstreamRef()); err != nil {
 		return failed(name, fmt.Errorf("resetting %s to %s: %w", defaultBranch, upstreamRef(), err))
+	}
+	// 6. Update the fork's remote-tracking ref (origin/main) to reflect the
+	// server-side sync from step 1, so `git status` reports the local default
+	// branch as in sync with the fork rather than ahead of a stale ref.
+	if err := repo.Fetch(ctx, originRemote); err != nil {
+		return failed(name, fmt.Errorf("fetching %s: %w", originRemote, err))
 	}
 
 	return workspace.Result{

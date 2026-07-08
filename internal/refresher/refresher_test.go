@@ -49,11 +49,12 @@ func makeRepo(t *testing.T, root, name string) string {
 // scriptOptions configures the scripted git behavior for a repository keyed by
 // its working directory.
 type scriptOptions struct {
-	fetchErr    error
-	resetErr    error // first `reset` (reset --hard, no ref) error
-	cleanErr    error
-	checkoutErr error
-	resetToErr  error // second `reset` (reset --hard <ref>) error
+	fetchErr       error // `fetch upstream --tags` error
+	originFetchErr error // `fetch origin` error
+	resetErr       error // first `reset` (reset --hard, no ref) error
+	cleanErr       error
+	checkoutErr    error
+	resetToErr     error // second `reset` (reset --hard <ref>) error
 }
 
 // scriptedRunner returns a MockRunner whose ResponseFunc scripts git output per
@@ -68,6 +69,11 @@ func scriptedRunner(opts map[string]scriptOptions) *git.MockRunner {
 		}
 		switch args[0] {
 		case "fetch":
+			// `fetch origin` (2 args) updates the fork tracking ref; `fetch
+			// upstream --tags` (3 args) pulls upstream commits and tags.
+			if len(args) >= 2 && args[1] == originRemote {
+				return "", o.originFetchErr
+			}
 			return "", o.fetchErr
 		case "reset":
 			if len(args) >= 3 { // reset --hard <ref>
@@ -169,6 +175,11 @@ func TestRefresh_SuccessfulReconcile(t *testing.T) {
 	if !findCall(runner, dir, "checkout", "main") {
 		t.Errorf("expected checkout main, calls=%v", callsInDir(runner, dir))
 	}
+	// The fork's remote-tracking ref is refreshed so origin/main reflects the
+	// server-side sync and `git status` reports the branch in sync.
+	if !findCall(runner, dir, "fetch", "origin") {
+		t.Errorf("expected fetch origin, calls=%v", callsInDir(runner, dir))
+	}
 }
 
 func TestRefresh_ForkDivergedFailsBeforeLocalChanges(t *testing.T) {
@@ -219,6 +230,32 @@ func TestRefresh_FetchFailure(t *testing.T) {
 	assertNoSubcommand(t, runner, dir, "reset")
 	assertNoSubcommand(t, runner, dir, "clean")
 	assertNoSubcommand(t, runner, dir, "checkout")
+}
+
+func TestRefresh_OriginFetchFailure(t *testing.T) {
+	root := t.TempDir()
+	dir := makeRepo(t, root, "alpha")
+	runner := scriptedRunner(map[string]scriptOptions{
+		dir: {originFetchErr: errors.New("network unreachable")},
+	})
+
+	sum, err := New().Refresh(context.Background(), newApp(root, runner), nil)
+	if err != nil {
+		t.Fatalf("Refresh returned unexpected error: %v", err)
+	}
+
+	res := resultsByRepo(sum)["alpha"]
+	if res.Outcome != workspace.OutcomeFailed {
+		t.Fatalf("expected failed, got %s (%+v)", res.Outcome, res)
+	}
+	if !strings.Contains(res.Reason, "origin") {
+		t.Errorf("expected reason to mention origin, got %q", res.Reason)
+	}
+	// The origin fetch is the final step, so the local reconcile must have
+	// already completed before it was attempted.
+	if !findCall(runner, dir, "reset", "--hard", "upstream/main") {
+		t.Errorf("expected local reset before origin fetch, calls=%v", callsInDir(runner, dir))
+	}
 }
 
 func TestRefresh_SubsetSelection(t *testing.T) {
