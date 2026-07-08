@@ -16,8 +16,9 @@ import (
 const controllerSuffix = "-controller"
 
 // generatorFileName is the code-generator configuration file at a controller
-// repository root. Its presence is what distinguishes a controller checkout
-// from any other directory under the workspace root.
+// repository root. Its presence is what distinguishes a valid controller
+// checkout from any other directory under the workspace root: work-in-progress
+// controllers that have not yet been scaffolded lack it and are skipped.
 const generatorFileName = "generator.yaml"
 
 // controllerRef identifies one discovered controller repository.
@@ -29,8 +30,11 @@ type controllerRef struct {
 }
 
 // discoverControllers lists the controller repositories directly under root: an
-// immediate subdirectory is a controller when it contains a generator.yaml. The
-// result is sorted by alias so "scan all controllers" is deterministic.
+// immediate subdirectory is a valid controller when it contains a
+// generator.yaml. Work-in-progress checkouts that have not yet been scaffolded
+// lack a generator.yaml and are skipped, so "scan all" only visits controllers
+// it can actually scan. The result is sorted by alias so "scan all controllers"
+// is deterministic.
 //
 // A non-existent root is treated as empty (nil slice, nil error), mirroring
 // workspace.Discover, so callers can report "no controllers" rather than fail.
@@ -49,7 +53,7 @@ func discoverControllers(root string) ([]controllerRef, error) {
 			continue
 		}
 		path := filepath.Join(root, e.Name())
-		if _, statErr := os.Stat(filepath.Join(path, generatorFileName)); statErr != nil {
+		if !isValidControllerWorkspace(path) {
 			continue
 		}
 		refs = append(refs, controllerRef{Alias: controllerAlias(e.Name()), Path: path})
@@ -61,6 +65,11 @@ func discoverControllers(root string) ([]controllerRef, error) {
 // findController resolves a single controller by alias under root. The supplied
 // identifier may be the bare alias ("acm") or the full directory name
 // ("acm-controller"); both resolve to the same repository.
+//
+// The error distinguishes two cases so an explicit scan is actionable: a
+// directory matching the alias that exists but lacks a generator.yaml (a
+// work-in-progress checkout that has not been scaffolded yet) reports that it is
+// not scannable, while a truly absent controller reports "not found".
 func findController(root, identifier string) (controllerRef, error) {
 	want := controllerAlias(identifier)
 	refs, err := discoverControllers(root)
@@ -72,7 +81,39 @@ func findController(root, identifier string) (controllerRef, error) {
 			return r, nil
 		}
 	}
+	if dir, ok := locateControllerDir(root, want); ok {
+		return controllerRef{}, fmt.Errorf(
+			"controller %q at %s is not scannable yet: no %s found (the controller may be a work in progress)",
+			identifier, dir, generatorFileName)
+	}
 	return controllerRef{}, fmt.Errorf("controller %q not found under %s", identifier, root)
+}
+
+// locateControllerDir returns the path of an immediate subdirectory of root
+// whose controller alias matches want, regardless of whether it is a valid
+// controller workspace. It lets findController tell a work-in-progress checkout
+// (present but not scaffolded) apart from a genuinely absent controller.
+func locateControllerDir(root, want string) (string, bool) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e.IsDir() && controllerAlias(e.Name()) == want {
+			return filepath.Join(root, e.Name()), true
+		}
+	}
+	return "", false
+}
+
+// isValidControllerWorkspace reports whether the directory at repoPath is a
+// scannable controller checkout. The presence of a generator.yaml (the
+// code-generator configuration) is what distinguishes a controller from any
+// other directory under the workspace root; work-in-progress controllers that
+// have not yet been scaffolded lack it and are treated as not scannable.
+func isValidControllerWorkspace(repoPath string) bool {
+	_, err := os.Stat(filepath.Join(repoPath, generatorFileName))
+	return err == nil
 }
 
 // controllerAlias derives the controller alias from a directory or identifier by

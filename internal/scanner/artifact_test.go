@@ -104,6 +104,55 @@ func TestDiscoverControllers(t *testing.T) {
 	}
 }
 
+func TestDiscoverControllersSkipsWorkInProgress(t *testing.T) {
+	root := t.TempDir()
+	writeControllerRepo(t, root, "acm-controller")
+	// A work-in-progress controller that has not been scaffolded yet lacks a
+	// generator.yaml and must be skipped rather than treated as a controller.
+	if err := os.MkdirAll(filepath.Join(root, "wip-controller"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	refs, err := discoverControllers(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0].Alias != "acm" {
+		t.Fatalf("discoverControllers = %v, want only [acm]", refs)
+	}
+}
+
+func TestFindControllerWorkInProgress(t *testing.T) {
+	root := t.TempDir()
+	// A checkout without a generator.yaml is a work-in-progress controller: it
+	// exists but is not scannable, and must be reported distinctly from an
+	// absent controller.
+	if err := os.MkdirAll(filepath.Join(root, "wip-controller"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := findController(root, "wip")
+	if err == nil {
+		t.Fatal("expected an error for a work-in-progress controller")
+	}
+	if !strings.Contains(err.Error(), "not scannable yet") {
+		t.Errorf("error = %q, want it to explain the checkout is not scannable yet", err)
+	}
+}
+
+func TestFindControllerTrulyMissing(t *testing.T) {
+	root := t.TempDir()
+	writeControllerRepo(t, root, "acm-controller")
+
+	_, err := findController(root, "nope")
+	if err == nil {
+		t.Fatal("expected an error for an absent controller")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want a \"not found\" message", err)
+	}
+}
+
 func TestDiscoverControllersMissingRoot(t *testing.T) {
 	refs, err := discoverControllers(filepath.Join(t.TempDir(), "nope"))
 	if err != nil {
