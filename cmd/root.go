@@ -12,6 +12,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/adder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/git"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/githubclient"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/initializer"
@@ -119,6 +120,10 @@ type deps struct {
 	removeRun func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error)
 	// releaseRun runs the Controller_Releaser for the release command.
 	releaseRun func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool, prBody string) (workspace.Summary, error)
+	// deployRun runs the Controller_Deployer for the deploy command: it builds the
+	// controller from local source and deploys it to the current kubeconfig
+	// cluster.
+	deployRun func(ctx context.Context, a app.App, service, namespace, imageTag, repository, region string) (workspace.Summary, error)
 	// scanRun runs the scanner for the scan command. It constructs the Bedrock
 	// model client (from the given region and model), directs the scanner's
 	// findings at out, and (when debugOut is non-nil) its conversation transcript
@@ -153,6 +158,14 @@ func defaultDeps() deps {
 				BaseBranch: baseBranch,
 				SkipPR:     skipPR,
 				PRBody:     prBody,
+			})
+		},
+		deployRun: func(ctx context.Context, a app.App, service, namespace, imageTag, repository, region string) (workspace.Summary, error) {
+			return deployer.New().Deploy(ctx, a, service, deployer.Options{
+				Namespace:  namespace,
+				ImageTag:   imageTag,
+				Repository: repository,
+				Region:     region,
 			})
 		},
 		scanRun: func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error) {
@@ -204,6 +217,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newStatusCommand(d, res),
 		newRemoveCommand(d, res),
 		newReleaseCommand(d, res),
+		newDeployCommand(d, res),
 		newScanCommand(d, res),
 		newConfigCommand(),
 	)

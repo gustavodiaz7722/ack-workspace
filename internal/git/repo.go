@@ -148,6 +148,24 @@ func (r *Repo) CurrentBranch(ctx context.Context) (name string, detached bool, e
 	return name, false, nil
 }
 
+// HeadSHA returns the abbreviated commit SHA of HEAD by running
+// `git rev-parse --short HEAD`. It identifies the exact local commit an artifact
+// (for example a controller image) is built from, so the checked-out
+// implementation branch can be tagged reproducibly. An empty result with no
+// error is treated as a failure since HEAD must always resolve in a valid
+// repository.
+func (r *Repo) HeadSHA(ctx context.Context) (string, error) {
+	out, err := r.runner.Run(ctx, r.Path, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolving HEAD sha: %w", err)
+	}
+	sha := strings.TrimSpace(out)
+	if sha == "" {
+		return "", fmt.Errorf("resolving HEAD sha: empty output")
+	}
+	return sha, nil
+}
+
 // IsDirty reports whether the working tree has uncommitted changes (modified,
 // staged, or untracked files). It runs `git status --porcelain`; any non-empty
 // output means the tree is dirty (a Dirty_Working_Tree).

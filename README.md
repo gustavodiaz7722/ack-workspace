@@ -24,6 +24,12 @@ automates it.
 - **`release`** — cut a release for a single service controller: update its base branch
   from upstream, create a `release-<version>` branch, regenerate the release artifacts,
   commit and push them to your fork, and open a pull request against upstream.
+- **`deploy`** — build a single service controller from its local implementation branch and
+  deploy it to the cluster named by your current kubeconfig context: resolve the target
+  cluster and your AWS account, ensure an ECR repository exists (creating it when absent),
+  build the controller image from the checked-out source, push it to ECR, and
+  `helm upgrade --install` the controller with the freshly built image. Requires `docker`,
+  `aws`, `kubectl`, and `helm` on your `PATH`.
 - **`status`** — report the state of every managed repository (branch, dirty flag,
   ahead/behind vs. upstream) as a table or JSON.
 - **`scan`** — investigate known issues in managed controllers with an Amazon Bedrock,
@@ -71,6 +77,7 @@ anything is missing:
 | `add`    |  yes  |     yes      |       yes       |
 | `remove` |  yes  |     yes      |       yes       |
 | `release`|  yes  |     yes¹     |       yes       |
+| `deploy` |  yes  |      no⁴     |       no        |
 | `refresh`|  yes  |     yes²     |       yes       |
 | `status` |  yes  |      no      |       no        |
 | `scan`   |  no³  |      no      |       no        |
@@ -84,6 +91,11 @@ fork branch; pass `--skip-pr` to push the release branch without opening a PR.
 ³ `scan` instead needs **AWS credentials** for Amazon Bedrock (resolved from the default
 AWS credential chain) and a `grep` executable on your `PATH`. A `GITHUB_TOKEN`, if present,
 is used to raise the rate limit when listing Terraform provider docs, but is not required.
+
+⁴ `deploy` needs `git` to tag the image with the controller's local HEAD, plus the
+`docker`, `aws`, `kubectl`, and `helm` executables on your `PATH`. It uses **AWS
+credentials** (default chain) to create/push to ECR and your current **kubeconfig context**
+to reach the cluster. No GitHub token or identity is required.
 
 Provide a GitHub token via the `--token` flag or the `GITHUB_TOKEN` environment variable.
 The token is **never** written to the config file.
@@ -244,6 +256,48 @@ Built-in safety: a controller with uncommitted changes is skipped, a base branch
 diverged from upstream is reported as a failure (never force-updated), an existing
 `release-<version>` branch is left untouched, and a release that generates no changes is
 reported as a no-op instead of creating an empty commit.
+
+### Build and deploy a controller from local source
+
+Build a single service controller from its **local implementation branch** and deploy it
+to the cluster named by your current kubeconfig context. Use this to test in-progress
+changes on a real cluster. The controller and the `code-generator` must already be present
+in your workspace (run `init` and `add` first), and `docker`, `aws`, `kubectl`, and `helm`
+must be on your `PATH`:
+
+```bash
+ack-workspace deploy ecr
+```
+
+This will:
+
+1. resolve the target cluster from `kubectl config current-context`,
+2. resolve your AWS account and region from the active AWS credentials,
+3. ensure an ECR repository (`ecr-controller` by default) exists in that account,
+   **creating it when absent**,
+4. build the controller image from your checked-out source by running the code-generator's
+   `./scripts/build-controller-image.sh ecr`, tagging it
+   `<account>.dkr.ecr.<region>.amazonaws.com/ecr-controller:<HEAD-sha>`,
+5. push the image to ECR (`aws ecr get-login-password` → `docker login` → `docker push`),
+   and
+6. `helm upgrade --install ack-ecr-controller <controller>/helm` into the `ack-system`
+   namespace, pointing the deployment at the freshly pushed image.
+
+The service may be a bare alias (`ecr`) or its full form (`ecr-controller`). By default the
+image is tagged with the controller's checked-out HEAD short SHA, so each build is
+traceable to the exact local commit. Useful flags:
+
+```bash
+ack-workspace deploy ecr --dry-run                     # preview every step; builds/pushes nothing
+ack-workspace deploy ecr --image-tag dev               # use a fixed tag instead of the HEAD SHA
+ack-workspace deploy ecr --namespace ack-test          # install into a different namespace
+ack-workspace deploy ecr --repository my-ecr-controller  # override the ECR repository name
+ack-workspace deploy ecr --region us-west-2            # push to and configure a specific region
+```
+
+> **Note:** `deploy` installs onto whatever cluster your current kubeconfig context points
+> at — verify it with `kubectl config current-context` before running. Prefer a local or
+> development cluster (for example a KIND cluster) over a shared one.
 
 ### Inspect workspace status
 
