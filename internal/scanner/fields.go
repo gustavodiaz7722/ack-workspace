@@ -71,7 +71,7 @@ func buildFieldIndex(repoPath, resource string) (string, error) {
 		return "", fmt.Errorf("CRD for %q has no spec schema", resource)
 	}
 
-	docPaths, iamPaths, err := loadFieldMarkings(repoPath, resource)
+	docPaths, iamPaths, refPaths, err := loadFieldConfig(repoPath, resource)
 	if err != nil {
 		return "", err
 	}
@@ -79,6 +79,7 @@ func buildFieldIndex(repoPath, resource string) (string, error) {
 	var records []fieldRecord
 	walkFields("", spec, &records)
 	records = filterReferenceFields(records)
+	records = filterConfiguredReferenceFields(records, refPaths)
 	sort.Slice(records, func(i, j int) bool { return records[i].Path < records[j].Path })
 	for i := range records {
 		norm := strings.ToLower(records[i].Path)
@@ -181,29 +182,64 @@ func underReferencePrefix(path string, refPrefixes map[string]bool) bool {
 	return false
 }
 
-// genMarkings decodes only the per-field document markings from generator.yaml.
+// filterConfiguredReferenceFields removes fields that generator.yaml configures
+// as cross-resource references. A reference field holds an ARN or identifier
+// that points at another resource, so it can never hold a JSON or IAM policy
+// document; the two sets are mutually exclusive. Dropping reference fields
+// shrinks the index the document issue must search without discarding any
+// candidate.
+//
+// This complements filterReferenceFields, which removes the generated
+// "<name>Ref" companion structures found in the CRD; this removes the reference
+// value field itself (for example the ARN string), which those structures shadow
+// but do not eliminate. refPaths holds the lowercased reference field paths from
+// generator.yaml, matched case-insensitively against the CRD paths (camelCase).
+func filterConfiguredReferenceFields(records []fieldRecord, refPaths map[string]bool) []fieldRecord {
+	if len(refPaths) == 0 {
+		return records
+	}
+	out := records[:0]
+	for _, r := range records {
+		norm := strings.ToLower(r.Path)
+		if refPaths[norm] || underReferencePrefix(norm, refPaths) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// genFieldConfig decodes only the per-field configuration the field index
+// needs: the document markings, and whether the field is a cross-resource
+// reference. references is captured as a raw node so its mere presence (a
+// non-zero node) signals a reference field, without decoding its internals.
+type genFieldConfig struct {
+	IsDocument  bool      `yaml:"is_document"`
+	IsIAMPolicy bool      `yaml:"is_iam_policy"`
+	References  yaml.Node `yaml:"references"`
+}
+
+// genMarkings decodes only the per-field configuration from generator.yaml.
 type genMarkings struct {
 	Resources map[string]struct {
-		Fields map[string]struct {
-			IsDocument  bool `yaml:"is_document"`
-			IsIAMPolicy bool `yaml:"is_iam_policy"`
-		} `yaml:"fields"`
+		Fields map[string]genFieldConfig `yaml:"fields"`
 	} `yaml:"resources"`
 }
 
-// loadFieldMarkings returns the sets of field paths (lowercased for
+// loadFieldConfig returns the sets of field paths (lowercased for
 // case-insensitive correlation with CRD camelCase paths) that generator.yaml
-// marks as is_document or is_iam_policy for the resource.
-func loadFieldMarkings(repoPath, resource string) (doc, iam map[string]bool, err error) {
+// marks as is_document or is_iam_policy, plus the set of field paths configured
+// as cross-resource references, for the resource.
+func loadFieldConfig(repoPath, resource string) (doc, iam, ref map[string]bool, err error) {
 	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading generator.yaml: %w", err)
+		return nil, nil, nil, fmt.Errorf("reading generator.yaml: %w", err)
 	}
 	var g genMarkings
 	if err := yaml.Unmarshal(data, &g); err != nil {
-		return nil, nil, fmt.Errorf("parsing generator.yaml: %w", err)
+		return nil, nil, nil, fmt.Errorf("parsing generator.yaml: %w", err)
 	}
-	doc, iam = map[string]bool{}, map[string]bool{}
+	doc, iam, ref = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for path, fc := range g.Resources[resource].Fields {
 		norm := strings.ToLower(path)
 		if fc.IsDocument {
@@ -212,8 +248,12 @@ func loadFieldMarkings(repoPath, resource string) (doc, iam map[string]bool, err
 		if fc.IsIAMPolicy {
 			iam[norm] = true
 		}
+		// A non-zero node means a `references:` block is present on the field.
+		if !fc.References.IsZero() {
+			ref[norm] = true
+		}
 	}
-	return doc, iam, nil
+	return doc, iam, ref, nil
 }
 
 // marshalFieldIndex renders the records as a JSON array with one field object

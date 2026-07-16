@@ -51,6 +51,12 @@ func TestBuildFieldIndex(t *testing.T) {
 			t.Errorf("reference field %q should have been filtered out", refPath)
 		}
 	}
+
+	// A field configured as a cross-resource reference in generator.yaml (RoleARN)
+	// holds an ARN, never a document, so it is filtered out of the index too.
+	if _, ok := byPath["roleARN"]; ok {
+		t.Errorf("reference-configured field roleARN should have been filtered out; got paths %v", byPath)
+	}
 }
 
 func TestFilterReferenceFields(t *testing.T) {
@@ -75,6 +81,46 @@ func TestFilterReferenceFields(t *testing.T) {
 		if got[dropped] {
 			t.Errorf("reference field %q should have been filtered", dropped)
 		}
+	}
+}
+
+func TestFilterConfiguredReferenceFields(t *testing.T) {
+	in := []fieldRecord{
+		{Path: "policyDocument"},
+		{Path: "roleARN"},
+		// A nested reference (generator.yaml keys with dotted paths) and any
+		// children beneath it are dropped; matching is case-insensitive.
+		{Path: "lambdaConfig.customMessage"},
+		{Path: "lambdaConfig.customMessage.child"},
+		{Path: "lambdaConfig.postConfirmation"},
+		{Path: "domainName"}, // not a reference; kept
+	}
+	// Reference paths as they appear in generator.yaml (PascalCase), lowercased.
+	refPaths := map[string]bool{
+		"rolearn":                       true,
+		"lambdaconfig.custommessage":    true,
+		"lambdaconfig.postconfirmation": true,
+	}
+
+	got := map[string]bool{}
+	for _, r := range filterConfiguredReferenceFields(in, refPaths) {
+		got[r.Path] = true
+	}
+	if !got["policyDocument"] || !got["domainName"] {
+		t.Errorf("non-reference fields were dropped: %v", got)
+	}
+	for _, dropped := range []string{"roleARN", "lambdaConfig.customMessage", "lambdaConfig.customMessage.child", "lambdaConfig.postConfirmation"} {
+		if got[dropped] {
+			t.Errorf("reference field %q should have been filtered", dropped)
+		}
+	}
+}
+
+func TestFilterConfiguredReferenceFieldsNoReferences(t *testing.T) {
+	in := []fieldRecord{{Path: "policyDocument"}, {Path: "domainName"}}
+	out := filterConfiguredReferenceFields(in, nil)
+	if len(out) != 2 {
+		t.Errorf("with no references, all %d fields should be kept, got %d", len(in), len(out))
 	}
 }
 

@@ -16,6 +16,11 @@ const testGeneratorYAML = `resources:
         is_document: true
       DomainName:
         is_immutable: true
+      RoleARN:
+        references:
+          resource: Role
+          service_name: iam
+          path: Status.ACKResourceMetadata.ARN
 `
 
 const testCRDYAML = `apiVersion: apiextensions.k8s.io/v1
@@ -38,6 +43,9 @@ spec:
                 policyDocument:
                   type: string
                   description: A JSON policy document.
+                roleARN:
+                  type: string
+                  description: The ARN of the role to assume.
                 tags:
                   type: array
                   items:
