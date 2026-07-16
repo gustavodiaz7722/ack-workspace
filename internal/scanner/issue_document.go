@@ -227,11 +227,14 @@ func documentUserPrompt(target Target) string {
 		target.Resource, target.Controller)
 }
 
-// defaultIssues returns the issues registered by default, wiring the given docs
-// fetcher into issues that consult external documentation. Today this is the
-// single document issue; new issues are added here as they are implemented.
-func defaultIssues(fetcher DocsFetcher) []Issue {
+// defaultIssues returns the issues registered by default, wiring the given
+// fetchers into the issues that consult external sources: the docs fetcher into
+// the document issue (Terraform provider docs) and the model fetcher into the
+// reference issue (AWS Smithy API models). New issues are added here as they are
+// implemented.
+func defaultIssues(docs DocsFetcher, models ModelFetcher) []Issue {
 	return []Issue{
-		newDocumentIssue(fetcher),
+		newDocumentIssue(docs),
+		newReferenceIssue(models),
 	}
 }

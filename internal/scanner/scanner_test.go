@@ -142,8 +142,8 @@ func TestResolveIssues(t *testing.T) {
 	s := New(&smartClient{})
 
 	all, err := s.resolveIssues(All)
-	if err != nil || len(all) != 1 {
-		t.Fatalf("resolveIssues(all) = %v, %v; want 1 issue", all, err)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("resolveIssues(all) = %v, %v; want 2 issues", all, err)
 	}
 	one, err := s.resolveIssues("1")
 	if err != nil || len(one) != 1 || one[0].Number != 1 {
@@ -168,7 +168,13 @@ func TestBuildJobsFanOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issues := NewRegistry().All()
+	// Fan out a single issue so the count reflects controller/resource fan-out
+	// independent of how many issues are registered.
+	issue, ok := NewRegistry().Get(1)
+	if !ok {
+		t.Fatal("issue 1 not registered")
+	}
+	issues := []Issue{issue}
 
 	// 2 controllers x 1 resource each (Certificate) x 1 issue = 2 jobs.
 	jobs, err := buildJobs(controllers, All, issues)

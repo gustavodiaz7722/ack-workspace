@@ -134,6 +134,36 @@ type generatorConfig struct {
 // under `resources:` matters for enumeration.
 type resourceConfig struct{}
 
+// sdkNamesConfig decodes only the sdk_names.model_name field of a controller's
+// generator.yaml: the aws-sdk-go-v2 model file name, which can differ from the
+// controller alias (for example the cognitoidentityprovider controller uses the
+// "cognito-identity-provider" model, and documentdb uses "docdb").
+type sdkNamesConfig struct {
+	SDKNames struct {
+		Model string `yaml:"model_name"`
+	} `yaml:"sdk_names"`
+}
+
+// resolveModelName returns the aws-sdk-go-v2 model file name for a controller:
+// the generator.yaml sdk_names.model_name override when set, otherwise the
+// fallback (the controller alias, which is the common case). An unreadable or
+// unparseable generator.yaml degrades to the fallback rather than failing, so a
+// model lookup can still be attempted.
+func resolveModelName(repoPath, fallback string) string {
+	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))
+	if err != nil {
+		return fallback
+	}
+	var c sdkNamesConfig
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return fallback
+	}
+	if c.SDKNames.Model != "" {
+		return c.SDKNames.Model
+	}
+	return fallback
+}
+
 // loadGeneratorConfig reads and decodes the controller's generator.yaml.
 func loadGeneratorConfig(repoPath string) (generatorConfig, error) {
 	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))

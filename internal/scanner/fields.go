@@ -259,6 +259,12 @@ func loadFieldConfig(repoPath, resource string) (doc, iam, ref map[string]bool, 
 // marshalFieldIndex renders the records as a JSON array with one field object
 // per line, so grep returns whole field records rather than fragments.
 func marshalFieldIndex(records []fieldRecord) string {
+	return marshalRecordsPerLine(records)
+}
+
+// marshalRecordsPerLine renders a slice of records as a JSON array with one
+// record object per line, so grep returns whole records rather than fragments.
+func marshalRecordsPerLine[T any](records []T) string {
 	if len(records) == 0 {
 		return "[]\n"
 	}
@@ -274,4 +280,72 @@ func marshalFieldIndex(records []fieldRecord) string {
 	}
 	b.WriteString("]\n")
 	return b.String()
+}
+
+// referenceFieldRecord is one CRD spec field in the field index the reference
+// issue greps. Unlike the document issue's index it does not carry document
+// markings; instead it records whether generator.yaml already configures the
+// field as a cross-resource reference, so the model can tell a field that is
+// correctly wired from one that is a candidate missing its reference.
+type referenceFieldRecord struct {
+	// Path is the field's dotted path within the resource spec, in the CRD's
+	// (camelCase) naming, for example "lambdaConfig.preSignUp".
+	Path string `json:"path"`
+	// Type is the OpenAPI type of the field (string, object, array, …).
+	Type string `json:"type"`
+	// Description is the field's CRD description, if any.
+	Description string `json:"description,omitempty"`
+	// IsReference reports whether generator.yaml already configures the field
+	// with a references block.
+	IsReference bool `json:"is_reference"`
+}
+
+// buildReferenceFieldIndex produces the field index the reference issue greps: a
+// one-field-per-line JSON array of every spec field of the resource's CRD, each
+// marked with whether generator.yaml already configures it as a cross-resource
+// reference.
+//
+// Unlike the document issue's index (buildFieldIndex), reference-configured
+// fields are kept — the point of this issue is to check whether reference fields
+// are configured, so they must be present and flagged. The generated "<name>Ref"
+// companion structures are still dropped (via filterReferenceFields) because
+// they are ACK plumbing, not API fields.
+func buildReferenceFieldIndex(repoPath, resource string) (string, error) {
+	crdContent, err := findResourceCRD(repoPath, resource)
+	if err != nil {
+		return "", err
+	}
+	var manifest crdManifest
+	if err := yaml.Unmarshal([]byte(crdContent), &manifest); err != nil {
+		return "", fmt.Errorf("parsing CRD for %q: %w", resource, err)
+	}
+	if len(manifest.Spec.Versions) == 0 {
+		return "", fmt.Errorf("CRD for %q has no versions", resource)
+	}
+	spec, ok := manifest.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+	if !ok {
+		return "", fmt.Errorf("CRD for %q has no spec schema", resource)
+	}
+
+	_, _, refPaths, err := loadFieldConfig(repoPath, resource)
+	if err != nil {
+		return "", err
+	}
+
+	var records []fieldRecord
+	walkFields("", spec, &records)
+	records = filterReferenceFields(records)
+	sort.Slice(records, func(i, j int) bool { return records[i].Path < records[j].Path })
+
+	refRecords := make([]referenceFieldRecord, len(records))
+	for i, r := range records {
+		norm := strings.ToLower(r.Path)
+		refRecords[i] = referenceFieldRecord{
+			Path:        r.Path,
+			Type:        r.Type,
+			Description: r.Description,
+			IsReference: refPaths[norm] || underReferencePrefix(norm, refPaths),
+		}
+	}
+	return marshalRecordsPerLine(refRecords), nil
 }

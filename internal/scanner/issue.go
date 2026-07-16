@@ -90,22 +90,23 @@ type Registry struct {
 }
 
 // NewRegistry returns the default registry populated with every issue the
-// scanner knows how to investigate, using an unauthenticated docs fetcher.
+// scanner knows how to investigate, using unauthenticated fetchers.
 func NewRegistry() *Registry {
-	return newRegistry(newHTTPDocsFetcher(""))
+	return newRegistry(newHTTPDocsFetcher(""), newHTTPModelFetcher(""))
 }
 
 // NewRegistryWithToken is NewRegistry with a GitHub token used to authenticate
-// documentation-listing requests, avoiding the low unauthenticated rate limit.
+// documentation- and model-listing requests, avoiding the low unauthenticated
+// rate limit.
 func NewRegistryWithToken(githubToken string) *Registry {
-	return newRegistry(newHTTPDocsFetcher(githubToken))
+	return newRegistry(newHTTPDocsFetcher(githubToken), newHTTPModelFetcher(githubToken))
 }
 
-// newRegistry builds the default registry with the given docs fetcher injected
-// into the issues that consult external documentation.
-func newRegistry(fetcher DocsFetcher) *Registry {
+// newRegistry builds the default registry with the given fetchers injected into
+// the issues that consult external sources.
+func newRegistry(docs DocsFetcher, models ModelFetcher) *Registry {
 	r := &Registry{issues: map[int]Issue{}}
-	for _, i := range defaultIssues(fetcher) {
+	for _, i := range defaultIssues(docs, models) {
 		r.register(i)
 	}
 	return r
