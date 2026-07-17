@@ -114,14 +114,15 @@ type treeEntry struct {
 
 // ListResources enumerates all of the provider's resource doc slugs, sorted.
 func (f *httpDocsFetcher) ListResources(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.treeURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	f.authorize(req)
-
-	resp, err := f.client.Do(req)
+	resp, err := getWithRetry(ctx, f.client, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.treeURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+		f.authorize(req)
+		return req, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("listing terraform docs: %w", err)
 	}
@@ -159,12 +160,14 @@ func (f *httpDocsFetcher) FetchDoc(ctx context.Context, slug string) (string, er
 	}
 
 	url := f.rawBaseURL + slug + ".html.markdown"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	f.authorize(req)
-	resp, err := f.client.Do(req)
+	resp, err := getWithRetry(ctx, f.client, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		f.authorize(req)
+		return req, nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("fetching %s: %w", url, err)
 	}

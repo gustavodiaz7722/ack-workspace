@@ -74,14 +74,16 @@ func (f *httpModelFetcher) FetchModel(ctx context.Context, modelName string) (st
 	}
 
 	url := f.rawBaseURL + modelName + ".json"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	if f.token != "" {
-		req.Header.Set("Authorization", "Bearer "+f.token)
-	}
-	resp, err := f.client.Do(req)
+	resp, err := getWithRetry(ctx, f.client, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		if f.token != "" {
+			req.Header.Set("Authorization", "Bearer "+f.token)
+		}
+		return req, nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("fetching model %s: %w", url, err)
 	}

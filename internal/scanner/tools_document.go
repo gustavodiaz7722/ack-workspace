@@ -63,7 +63,14 @@ func loadTerraformIndexSource(fetcher DocsFetcher) func(context.Context, Target,
 	return func(ctx context.Context, _ Target, _ string) (string, error) {
 		slugs, err := fetcher.ListResources(ctx)
 		if err != nil {
-			return "", err
+			// The index is served by the GitHub REST API, which can be rate
+			// limited or degraded. It is only a convenience for discovering the
+			// exact slug, so tell the agent to stop retrying it and fall back to
+			// the terraform_doc source (served by a separate, more reliable raw
+			// endpoint) with a slug it derives itself.
+			return "", fmt.Errorf("%w: the terraform_index is temporarily unavailable — do not retry it; "+
+				"instead derive the likely resource slug (snake_case) and query the terraform_doc source "+
+				"directly with that slug as \"ref\"", err)
 		}
 		return strings.Join(slugs, "\n") + "\n", nil
 	}
