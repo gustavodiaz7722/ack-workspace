@@ -50,37 +50,60 @@ type crdManifest struct {
 	} `yaml:"spec"`
 }
 
+// resourceSpecSchema returns the OpenAPI schema of a resource's CRD spec,
+// resolving the CRD by Kind and parsing down to the spec property. It is the
+// shared front half of every field-index builder.
+func resourceSpecSchema(repoPath, resource string) (crdSchemaNode, error) {
+	crdContent, err := findResourceCRD(repoPath, resource)
+	if err != nil {
+		return crdSchemaNode{}, err
+	}
+	var manifest crdManifest
+	if err := yaml.Unmarshal([]byte(crdContent), &manifest); err != nil {
+		return crdSchemaNode{}, fmt.Errorf("parsing CRD for %q: %w", resource, err)
+	}
+	if len(manifest.Spec.Versions) == 0 {
+		return crdSchemaNode{}, fmt.Errorf("CRD for %q has no versions", resource)
+	}
+	spec, ok := manifest.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+	if !ok {
+		return crdSchemaNode{}, fmt.Errorf("CRD for %q has no spec schema", resource)
+	}
+	return spec, nil
+}
+
+// specFieldRecords walks a resource's CRD spec into sorted field records with
+// the ACK-generated "<name>Ref" companion structures filtered out. It is the
+// shared body every field-index builder starts from before applying its own
+// per-field markings.
+func specFieldRecords(repoPath, resource string) ([]fieldRecord, error) {
+	spec, err := resourceSpecSchema(repoPath, resource)
+	if err != nil {
+		return nil, err
+	}
+	var records []fieldRecord
+	walkFields("", spec, &records)
+	records = filterReferenceFields(records)
+	sort.Slice(records, func(i, j int) bool { return records[i].Path < records[j].Path })
+	return records, nil
+}
+
 // buildFieldIndex produces the combined field index for a resource as a JSON
 // document (a one-field-per-line array, so it greps cleanly). Every spec field
 // of the resource's CRD is included with its type, description, dotted path, and
 // the is_document / is_iam_policy markings resolved from generator.yaml.
+// Fields configured as cross-resource references are dropped: they hold an
+// identifier, never a document, so they are never candidates for this issue.
 func buildFieldIndex(repoPath, resource string) (string, error) {
-	crdContent, err := findResourceCRD(repoPath, resource)
+	records, err := specFieldRecords(repoPath, resource)
 	if err != nil {
 		return "", err
 	}
-	var manifest crdManifest
-	if err := yaml.Unmarshal([]byte(crdContent), &manifest); err != nil {
-		return "", fmt.Errorf("parsing CRD for %q: %w", resource, err)
-	}
-	if len(manifest.Spec.Versions) == 0 {
-		return "", fmt.Errorf("CRD for %q has no versions", resource)
-	}
-	spec, ok := manifest.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
-	if !ok {
-		return "", fmt.Errorf("CRD for %q has no spec schema", resource)
-	}
-
 	docPaths, iamPaths, refPaths, err := loadFieldConfig(repoPath, resource)
 	if err != nil {
 		return "", err
 	}
-
-	var records []fieldRecord
-	walkFields("", spec, &records)
-	records = filterReferenceFields(records)
 	records = filterConfiguredReferenceFields(records, refPaths)
-	sort.Slice(records, func(i, j int) bool { return records[i].Path < records[j].Path })
 	for i := range records {
 		norm := strings.ToLower(records[i].Path)
 		records[i].IsDocument = docPaths[norm]
@@ -311,32 +334,14 @@ type referenceFieldRecord struct {
 // companion structures are still dropped (via filterReferenceFields) because
 // they are ACK plumbing, not API fields.
 func buildReferenceFieldIndex(repoPath, resource string) (string, error) {
-	crdContent, err := findResourceCRD(repoPath, resource)
+	records, err := specFieldRecords(repoPath, resource)
 	if err != nil {
 		return "", err
 	}
-	var manifest crdManifest
-	if err := yaml.Unmarshal([]byte(crdContent), &manifest); err != nil {
-		return "", fmt.Errorf("parsing CRD for %q: %w", resource, err)
-	}
-	if len(manifest.Spec.Versions) == 0 {
-		return "", fmt.Errorf("CRD for %q has no versions", resource)
-	}
-	spec, ok := manifest.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
-	if !ok {
-		return "", fmt.Errorf("CRD for %q has no spec schema", resource)
-	}
-
 	_, _, refPaths, err := loadFieldConfig(repoPath, resource)
 	if err != nil {
 		return "", err
 	}
-
-	var records []fieldRecord
-	walkFields("", spec, &records)
-	records = filterReferenceFields(records)
-	sort.Slice(records, func(i, j int) bool { return records[i].Path < records[j].Path })
-
 	refRecords := make([]referenceFieldRecord, len(records))
 	for i, r := range records {
 		norm := strings.ToLower(r.Path)
@@ -348,4 +353,32 @@ func buildReferenceFieldIndex(repoPath, resource string) (string, error) {
 		}
 	}
 	return marshalRecordsPerLine(refRecords), nil
+}
+
+// fieldTypeRecord is one CRD spec field in the structural field index the
+// sub-resource issue greps: just the path, type, and description, with no
+// generator.yaml markings. It is deliberately minimal — the issue reasons about
+// the shape of the field tree (which fields are nested objects or arrays of
+// objects, and whether they carry id/arn/tags sub-fields), not about markings.
+type fieldTypeRecord struct {
+	Path        string `json:"path"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+}
+
+// buildFieldTypeIndex produces the structural field index for a resource: a
+// one-field-per-line JSON array of every spec field with its dotted path, type,
+// and description. Unlike the document and reference indexes it carries no
+// markings and keeps every field (only the generated "<name>Ref" companions are
+// dropped), so the sub-resource issue can see the full nested shape of the CRD.
+func buildFieldTypeIndex(repoPath, resource string) (string, error) {
+	records, err := specFieldRecords(repoPath, resource)
+	if err != nil {
+		return "", err
+	}
+	typeRecords := make([]fieldTypeRecord, len(records))
+	for i, r := range records {
+		typeRecords[i] = fieldTypeRecord{Path: r.Path, Type: r.Type, Description: r.Description}
+	}
+	return marshalRecordsPerLine(typeRecords), nil
 }

@@ -142,8 +142,8 @@ func TestResolveIssues(t *testing.T) {
 	s := New(&smartClient{})
 
 	all, err := s.resolveIssues(All)
-	if err != nil || len(all) != 2 {
-		t.Fatalf("resolveIssues(all) = %v, %v; want 2 issues", all, err)
+	if err != nil || len(all) != 3 {
+		t.Fatalf("resolveIssues(all) = %v, %v; want 3 issues", all, err)
 	}
 	one, err := s.resolveIssues("1")
 	if err != nil || len(one) != 1 || one[0].Number != 1 {

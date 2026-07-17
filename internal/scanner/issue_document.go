@@ -236,5 +236,6 @@ func defaultIssues(docs DocsFetcher, models ModelFetcher) []Issue {
 	return []Issue{
 		newDocumentIssue(docs),
 		newReferenceIssue(models),
+		newSubresourceIssue(docs),
 	}
 }
