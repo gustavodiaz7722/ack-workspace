@@ -16,6 +16,8 @@ const testGeneratorYAML = `resources:
         is_document: true
       DomainName:
         is_immutable: true
+      Name:
+        is_primary_key: true
       RoleARN:
         references:
           resource: Role
@@ -37,6 +39,9 @@ spec:
             spec:
               type: object
               properties:
+                name:
+                  type: string
+                  description: The resource name.
                 domainName:
                   type: string
                   description: The fully qualified domain name.

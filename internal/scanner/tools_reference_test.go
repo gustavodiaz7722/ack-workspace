@@ -65,6 +65,16 @@ func TestBuildReferenceFieldIndex(t *testing.T) {
 		t.Errorf("domainName = %+v (present=%v), want present and not a reference", dn, ok)
 	}
 
+	// Unlike the document index, immutable and primary-key fields are KEPT in the
+	// reference index and surfaced as signal — a reference is often immutable or a
+	// sub-resource's primary key.
+	if dn, ok := byPath["domainName"]; !ok || !dn.IsImmutable {
+		t.Errorf("domainName = %+v (present=%v), want present and is_immutable true", dn, ok)
+	}
+	if n, ok := byPath["name"]; !ok || !n.IsPrimaryKey {
+		t.Errorf("name = %+v (present=%v), want present and is_primary_key true", n, ok)
+	}
+
 	// The generated companion Ref structure is still dropped.
 	if _, ok := byPath["roleRef"]; ok {
 		t.Error("generated roleRef companion should be filtered out of the reference index")

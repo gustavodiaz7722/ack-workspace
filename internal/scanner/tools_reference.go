@@ -24,9 +24,11 @@ func referenceSources(fetcher ModelFetcher) []Source {
 		{
 			Name: sourceFields,
 			Description: "Every spec field of the resource's CRD as JSON, one field per line: " +
-				"path (dot notation), type, description, and is_reference (whether generator.yaml already " +
-				"configures the field as a cross-resource reference). Grep it to find the CRD field matching " +
-				"a model field and whether its reference is already configured.",
+				"path (dot notation), type, description, is_reference (whether generator.yaml already " +
+				"configures the field as a cross-resource reference), is_immutable, and is_primary_key. " +
+				"Grep it to find the CRD field matching a model field and whether its reference is already " +
+				"configured; is_immutable is a supporting signal for a reference (references are often set once), " +
+				"and is_primary_key flags the resource's own primary key.",
 			Load: loadReferenceFieldsSource,
 		},
 		{

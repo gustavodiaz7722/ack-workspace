@@ -199,7 +199,7 @@ Background:
 
 You have a single tool, %s, which searches a fixed set of sources with a regular expression:
 - %q: the service's AWS Smithy JSON API model, filtered to this resource's shapes. Members have a "target" shape and "traits"; look for "aws.api#arnReference" and "smithy.api#documentation".
-- %q: every spec field of the resource's CRD as JSON, one field per line, each with its path, type, description, and its is_reference marking from generator.yaml. This tells you which CRD field matches a model field and whether its reference is already configured.
+- %q: every spec field of the resource's CRD as JSON, one field per line, each with its path, type, description, and its is_reference, is_immutable, and is_primary_key markings from generator.yaml. This tells you which CRD field matches a model field and whether its reference is already configured. is_immutable is a supporting signal — a reference is frequently immutable (a KMS key, IAM role, parent ID, or subnet is set once) — not a reason to exclude a field. is_primary_key flags the resource's own primary key: exclude it only when it is the resource's own identifier, but note a sub-resource's primary key can itself be a reference to its parent.
 These are the only things you can read.
 
 Signals for identifying a reference, in order of confidence:
