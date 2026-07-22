@@ -30,6 +30,11 @@ automates it.
   build the controller image from the checked-out source, push it to ECR, and
   `helm upgrade --install` the controller with the freshly built image. Requires `docker`,
   `aws`, `kubectl`, and `helm` on your `PATH`.
+- **`build`** — regenerate a single service controller's code from its local checked-out
+  branch by running the code-generator's `make build-controller` target. Wires up the
+  environment overrides (`RUNTIME_CRD_DIR`, `ACK_GENERATE_BIN_PATH`, `TEMPLATES_DIR`) that
+  the code-generator scripts otherwise resolve relative to a workspace root literally named
+  `aws-controllers-k8s`, so the build succeeds from any workspace root.
 - **`status`** — report the state of every managed repository (branch, dirty flag,
   ahead/behind vs. upstream) as a table or JSON.
 - **`scan`** — investigate known issues in managed controllers with an Amazon Bedrock,
@@ -78,6 +83,7 @@ anything is missing:
 | `remove` |  yes  |     yes      |       yes       |
 | `release`|  yes  |     yes¹     |       yes       |
 | `deploy` |  yes  |      no⁴     |       no        |
+| `build`  |  yes  |      no⁵     |       no        |
 | `refresh`|  yes  |     yes²     |       yes       |
 | `status` |  yes  |      no      |       no        |
 | `scan`   |  no³  |      no      |       no        |
@@ -96,6 +102,10 @@ is used to raise the rate limit when listing Terraform provider docs, but is not
 `docker`, `aws`, `kubectl`, and `helm` executables on your `PATH`. It uses **AWS
 credentials** (default chain) to create/push to ECR and your current **kubeconfig context**
 to reach the cluster. No GitHub token or identity is required.
+
+⁵ `build` needs `git` to read the controller's checked-out branch, plus the `make` and `go`
+toolchain (and the code-generator's own build dependencies, such as `controller-gen` and
+`helm`) on your `PATH`. No GitHub token or identity is required.
 
 Provide a GitHub token via the `--token` flag or the `GITHUB_TOKEN` environment variable.
 The token is **never** written to the config file.
@@ -256,6 +266,39 @@ Built-in safety: a controller with uncommitted changes is skipped, a base branch
 diverged from upstream is reported as a failure (never force-updated), an existing
 `release-<version>` branch is left untouched, and a release that generates no changes is
 reported as a no-op instead of creating an empty commit.
+
+### Build a controller from local source
+
+Regenerate a single service controller's code from its **local checked-out branch** by
+running the code-generator's `make build-controller` target. Use this to regenerate a
+controller after editing its `generator.yaml` or hook templates. The controller and the
+`code-generator` must already be present in your workspace (run `init` and `add` first),
+and the `make`/`go` toolchain must be on your `PATH`:
+
+```bash
+ack-workspace build ecr
+```
+
+This runs `make build-controller SERVICE=ecr` in the `code-generator` directory against
+whatever the controller repository currently has checked out — it never switches branches
+or touches git history.
+
+Crucially, `build` wires up the environment overrides the code-generator scripts need when
+your workspace root is **not** literally named `aws-controllers-k8s`. Those scripts default
+`RUNTIME_CRD_DIR`, `ACK_GENERATE_BIN_PATH`, and `TEMPLATES_DIR` to paths relative to a
+grandparent directory named `aws-controllers-k8s`, so a workspace rooted anywhere else
+otherwise fails with `No such file or directory` or `Unable to find an ack-generate
+binary`. `build` resolves all three against your real `--workspace-root` so the full build
+(code, CRDs, RBAC, and Helm chart) succeeds regardless of the root's name.
+
+The service may be a bare alias (`ecr`) or its full form (`ecr-controller`). By default the
+aws-sdk-go version is read from the controller's `apis/<version>/ack-generate-metadata.yaml`;
+pass `--sdk-version` to pin it. Useful flags:
+
+```bash
+ack-workspace build ecr --dry-run              # print the command that would run; builds nothing
+ack-workspace build ecr --sdk-version v1.41.0  # pin the aws-sdk-go version
+```
 
 ### Build and deploy a controller from local source
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws-controllers-k8s/ack-workspace/internal/adder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/builder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
@@ -61,6 +62,10 @@ type recorder struct {
 	releaseSkipPR  bool
 	releasePRBody  string
 
+	buildCalled     bool
+	buildService    string
+	buildSDKVersion string
+
 	summary workspace.Summary
 	runErr  error
 }
@@ -102,6 +107,12 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 			rec.releaseBase = baseBranch
 			rec.releaseSkipPR = skipPR
 			rec.releasePRBody = prBody
+			return rec.summary, rec.runErr
+		},
+		buildRun: func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error) {
+			rec.buildCalled = true
+			rec.buildService = service
+			rec.buildSDKVersion = sdkVersion
 			return rec.summary, rec.runErr
 		},
 	}
@@ -441,7 +452,7 @@ func TestConfigGetMissingIdentityErrors(t *testing.T) {
 // Guard: the root command exposes the expected subcommands.
 func TestRootRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := map[string]bool{"init": false, "add": false, "refresh": false, "status": false, "remove": false, "release": false, "deploy": false, "config": false}
+	want := map[string]bool{"init": false, "add": false, "refresh": false, "status": false, "remove": false, "release": false, "deploy": false, "build": false, "config": false}
 	for _, c := range cmd.Commands() {
 		name := strings.Fields(c.Use)[0]
 		if _, ok := want[name]; ok {
@@ -624,5 +635,68 @@ func TestRelease_MissingVersionSurfacesUsageError(t *testing.T) {
 	var ue *releaser.UsageError
 	if !errors.As(err, &ue) {
 		t.Fatalf("error type = %T, want *releaser.UsageError", err)
+	}
+}
+
+// --- build command -----------------------------------------------------------
+
+func TestBuild_NeedsGitOnly(t *testing.T) {
+	isolateEnv(t)
+	chk := &fakeChecker{}
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(chk, rec),
+		"build", "ecr", "--"+config.FlagGitHubUser, "octocat")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !chk.called {
+		t.Fatal("prerequisite checker was not called")
+	}
+	want := prereq.Need{Git: true}
+	if chk.gotNeed != want {
+		t.Errorf("Need = %+v, want %+v", chk.gotNeed, want)
+	}
+	if !rec.buildCalled {
+		t.Error("buildRun was not called")
+	}
+	if rec.buildService != "ecr" {
+		t.Errorf("service = %q, want ecr", rec.buildService)
+	}
+}
+
+func TestBuild_ParsesServiceAndSDKVersion(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"build", "ecr-controller", "--"+flagSDKVersion, "v1.41.0",
+		"--"+config.FlagGitHubUser, "octocat")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.buildCalled {
+		t.Fatal("buildRun was not called")
+	}
+	if rec.buildService != "ecr-controller" {
+		t.Errorf("service = %q, want ecr-controller", rec.buildService)
+	}
+	if rec.buildSDKVersion != "v1.41.0" {
+		t.Errorf("sdk version = %q, want v1.41.0", rec.buildSDKVersion)
+	}
+}
+
+func TestBuild_EmptyServiceSurfacesUsageError(t *testing.T) {
+	isolateEnv(t)
+	// Use the real Controller_Builder so the service-required rule is enforced
+	// where it lives. A passing checker isolates the builder's behavior.
+	d := defaultDeps()
+	d.checker = &fakeChecker{}
+
+	_, _, err := runCmd(t, d, "build", "--"+config.FlagGitHubUser, "octocat")
+	if err == nil {
+		t.Fatal("expected a usage error for a missing service, got nil")
+	}
+	var ue *builder.UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("error type = %T, want *builder.UsageError", err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws-controllers-k8s/ack-workspace/internal/adder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/builder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/git"
@@ -124,6 +125,10 @@ type deps struct {
 	// controller from local source and deploys it to the current kubeconfig
 	// cluster.
 	deployRun func(ctx context.Context, a app.App, service, namespace, imageTag, repository, region string) (workspace.Summary, error)
+	// buildRun runs the Controller_Builder for the build command: it regenerates
+	// the controller's code from local source via the code-generator's
+	// `make build-controller` target.
+	buildRun func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error)
 	// scanRun runs the scanner for the scan command. It constructs the Bedrock
 	// model client (from the given region and model), directs the scanner's
 	// findings at out, and (when debugOut is non-nil) its conversation transcript
@@ -166,6 +171,11 @@ func defaultDeps() deps {
 				ImageTag:   imageTag,
 				Repository: repository,
 				Region:     region,
+			})
+		},
+		buildRun: func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error) {
+			return builder.New().Build(ctx, a, service, builder.Options{
+				SDKVersion: sdkVersion,
 			})
 		},
 		scanRun: func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error) {
@@ -218,6 +228,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newRemoveCommand(d, res),
 		newReleaseCommand(d, res),
 		newDeployCommand(d, res),
+		newBuildCommand(d, res),
 		newScanCommand(d, res),
 		newConfigCommand(),
 	)
