@@ -131,10 +131,12 @@ type ModelClient interface {
 
 // defaultMaxTurns bounds a single conversation so a misbehaving model cannot
 // loop forever calling tools without ever reporting findings. A thorough
-// investigation (list docs, search, then read several line ranges for context)
-// can legitimately take well over a dozen turns, so the ceiling is set high
-// enough to let those complete while still guaranteeing termination.
-const defaultMaxTurns = 20
+// investigation can legitimately take many turns: a wide CRD may have dozens of
+// candidate nested fields, and confirming each against external documentation
+// (search, then read several ranges) costs multiple turns apiece. The ceiling
+// is set high enough to let those complete while still guaranteeing
+// termination.
+const defaultMaxTurns = 40
 
 // ErrNoFindings indicates the model ended the conversation with a normal turn
 // without ever calling the report tool, so no structured findings were
