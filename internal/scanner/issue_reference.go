@@ -27,7 +27,7 @@ var referenceOutputSchema = json.RawMessage(`{
         "properties": {
           "model_field": {
             "type": "string",
-            "description": "The AWS API model member that identified this as a reference, e.g. \"RoleArn\" or \"KmsKeyId\"."
+            "description": "The CRD field name that identified this as a reference, e.g. \"roleARN\" or \"kmsKeyID\". Usually the last segment of ack_field_path."
           },
           "ack_field_path": {
             "type": "string",
@@ -43,7 +43,7 @@ var referenceOutputSchema = json.RawMessage(`{
           },
           "signal": {
             "type": "string",
-            "enum": ["arn_trait", "arn_suffix", "id_suffix", "name_suffix", "doc_mention"],
+            "enum": ["arn_pattern", "arn_suffix", "id_suffix", "name_suffix", "doc_mention"],
             "description": "The strongest signal that identified this as a reference."
           },
           "has_reference": {
@@ -194,33 +194,41 @@ Your task: for the %q resource of the %q controller, identify fields that are cr
 
 Background:
 - ACK generator.yaml can configure a field with a "references" block, which lets a user point at another Kubernetes resource instead of hardcoding an ARN/ID/Name. A field that holds an identifier of another AWS resource but lacks this block is the problem this issue looks for.
-- The AWS Smithy API model is the source of truth for what a field holds. The definitive signal is the "aws.api#arnReference" trait on a member or its target shape.
-- The two sets are mutually exclusive with document fields: a reference holds an identifier, not a JSON/policy document.
+- References are mutually exclusive with document fields: a reference holds an identifier, not a JSON/policy document.
 
-You have a single tool, %s, which searches a fixed set of sources with a regular expression:
-- %q: the service's AWS Smithy JSON API model, filtered to this resource's shapes. Members have a "target" shape and "traits"; look for "aws.api#arnReference" and "smithy.api#documentation".
-- %q: every spec field of the resource's CRD as JSON, one field per line, each with its path, type, description, and its is_reference, is_immutable, and is_primary_key markings from generator.yaml. This tells you which CRD field matches a model field and whether its reference is already configured. is_immutable is a supporting signal — a reference is frequently immutable (a KMS key, IAM role, parent ID, or subnet is set once) — not a reason to exclude a field. is_primary_key flags the resource's own primary key: exclude it only when it is the resource's own identifier, but note a sub-resource's primary key can itself be a reference to its parent.
-These are the only things you can read.
+You have a single tool, %s, which searches one source with a regular expression:
+- %q: every spec field of the resource's CRD as JSON, one field per line. Each record has:
+  - "path": the full CRD field path in dot notation, e.g. "lambdaConfig.preSignUp".
+  - "type": the field's type. Only string-valued fields are listed, because an identifier is always a string.
+  - "description" and "description_source": what the field holds. "crd" means the description came from the CRD itself; "model" means it was resolved from the service's AWS API model, which is the only place nested fields are documented. Weigh both equally.
+  - "pattern": the API model's validation pattern, when the field has one. An ARN pattern such as "^arn:aws[a-z\-]*:iam::\d{12}:role/?...$" names the referenced service and resource type outright and is the strongest signal available.
+  - "is_reference": whether generator.yaml already configures the field as a cross-resource reference.
+  - "is_immutable": a supporting signal, since a reference is frequently set once (a KMS key, IAM role, parent ID, or subnet).
+  - "is_primary_key": the resource's own primary key. Exclude it when it is the resource's own identifier, but note a sub-resource's primary key can itself be a reference to its parent.
+This is the only thing you can read. Every field you can report on is in it, so every finding must carry a non-empty ack_field_path.
 
 Signals for identifying a reference, in order of confidence:
-1. aws.api#arnReference trait on the member or its target shape (signal "arn_trait", highest confidence).
-2. Member name ending in "Arn"/"ARN" with documentation naming another service/resource (signal "arn_suffix").
-3. Member name ending in "Id"/"ID" with documentation like "The ID of the ..." (signal "id_suffix").
-4. Documentation explicitly saying to use another API/service to obtain the value (signal "doc_mention").
-5. Member name ending in "Name" with documentation naming a specific resource type (signal "name_suffix", lower confidence).
+1. A "pattern" that is an ARN template naming another service and resource type (signal "arn_pattern", highest confidence).
+2. Field name ending in "ARN" with a description naming another service/resource (signal "arn_suffix").
+3. Field name ending in "ID" with a description like "The ID of the ..." (signal "id_suffix").
+4. A description explicitly saying to use another API/service to obtain the value (signal "doc_mention").
+5. Field name ending in "Name" with a description naming a specific resource type (signal "name_suffix", lower confidence).
 
 EXCLUDE (do not report): JSON/policy document fields; tags; enum fields; the resource's own primary key (its own name/ID/ARN); and free-form strings such as descriptions.
 
 Method — perform your research in this order:
-1. grep %q for "arnReference" to find the definitive reference members, then grep for members ending in "Arn", "Id", or "Name" and read their "smithy.api#documentation" to judge whether they point at another resource.
-2. For each candidate, grep %q to find the matching CRD field (the model uses PascalCase, the CRD uses camelCase, e.g. RoleArn -> roleArn) and read its is_reference marking. Record the full CRD field path in dot notation.
-3. A reference field with is_reference=false is the problem this issue looks for; give those the highest confidence consistent with the signal. If a model reference field has no corresponding CRD field, note it with an empty ack_field_path.
-4. Report your findings.
+1. grep %q for "arn:aws" to find the fields whose pattern is an ARN template. These are your highest-confidence candidates.
+2. grep %q for "(ARN|ID|Name)\"" to find the remaining candidates by name, and read each one's description to judge whether it points at another AWS resource or is just local data.
+3. grep %q for descriptions that name another service or tell the caller to call another API (for example "iam|kms|lambda|s3|the ID of the|use the .* API"), which catches references whose names give nothing away.
+4. For each candidate, read its "is_reference" marking. A reference field with is_reference=false is the problem this issue looks for; give those the highest confidence consistent with the signal.
+5. Report your findings.
+
+Nested fields are the ones most likely to be misconfigured — top-level ARN fields are usually already wired up — so do not stop at the top level of the path tree.
 
 When you have gathered enough evidence, call the %s tool exactly once with your complete findings. Do not answer in prose; report only through that tool.`,
 		target.Resource, target.Controller,
-		toolGrep, sourceModel, sourceFields,
-		sourceModel, sourceFields, reportToolName)
+		toolGrep, sourceFields,
+		sourceFields, sourceFields, sourceFields, reportToolName)
 }
 
 // referenceUserPrompt is the initial user turn that starts the investigation.

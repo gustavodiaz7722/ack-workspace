@@ -2,11 +2,9 @@ package scanner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -112,94 +110,6 @@ func (f *httpModelFetcher) store(name, model string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cache[name] = model
-}
-
-// filterModelContent reduces a full Smithy model to the shapes relevant to one
-// resource, keeping the raw JSON structure (so the aws.api#arnReference traits
-// and member documentation the reference issue depends on stay intact) while
-// cutting the volume the agent must grep.
-//
-// Selection is by shape name: any shape whose short name (the part after "#")
-// contains the resource kind case-insensitively is kept, along with the shapes
-// its members target (one level out), so a member's target shape — which is
-// where an arnReference trait usually lives — is visible alongside it. When the
-// model cannot be parsed or nothing matches, the full model is returned so the
-// agent still has something to search.
-func filterModelContent(content, resource string) string {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(content), &top); err != nil {
-		return content
-	}
-	shapesRaw, ok := top["shapes"]
-	if !ok {
-		return content
-	}
-	var shapes map[string]json.RawMessage
-	if err := json.Unmarshal(shapesRaw, &shapes); err != nil {
-		return content
-	}
-
-	keyword := strings.ToLower(resource)
-	relevant := map[string]json.RawMessage{}
-	for name, data := range shapes {
-		if strings.Contains(strings.ToLower(shortShapeName(name)), keyword) {
-			relevant[name] = data
-		}
-	}
-	if len(relevant) == 0 {
-		return content
-	}
-
-	// Pull in the shapes that the selected structures' members target, so a
-	// member and the shape carrying its arnReference trait are searchable
-	// together.
-	for _, data := range collect(relevant) {
-		for _, target := range memberTargets(data) {
-			if td, ok := shapes[target]; ok {
-				if _, seen := relevant[target]; !seen {
-					relevant[target] = td
-				}
-			}
-		}
-	}
-
-	filtered, err := json.MarshalIndent(map[string]any{"shapes": relevant}, "", "    ")
-	if err != nil {
-		return content
-	}
-	return string(filtered)
-}
-
-// collect returns the values of a shape map as a slice so iteration is not
-// affected by concurrent insertion into the same map.
-func collect(m map[string]json.RawMessage) []json.RawMessage {
-	out := make([]json.RawMessage, 0, len(m))
-	for _, v := range m {
-		out = append(out, v)
-	}
-	return out
-}
-
-// memberTargets returns the target shape names of a structure shape's members,
-// sorted for determinism. Non-structure shapes yield no targets.
-func memberTargets(shapeData json.RawMessage) []string {
-	var shape struct {
-		Type    string `json:"type"`
-		Members map[string]struct {
-			Target string `json:"target"`
-		} `json:"members"`
-	}
-	if err := json.Unmarshal(shapeData, &shape); err != nil {
-		return nil
-	}
-	var targets []string
-	for _, m := range shape.Members {
-		if m.Target != "" {
-			targets = append(targets, m.Target)
-		}
-	}
-	sort.Strings(targets)
-	return targets
 }
 
 // shortShapeName returns the local part of a Smithy shape id, dropping the

@@ -37,7 +37,7 @@ func TestBuildReferenceFieldIndex(t *testing.T) {
 	root := t.TempDir()
 	repo := writeControllerRepo(t, root, "acm-controller")
 
-	out, err := buildReferenceFieldIndex(repo, "Certificate")
+	out, err := buildReferenceFieldIndex(repo, "Certificate", docIndex{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,16 +127,57 @@ func TestGrepToolReferenceSources(t *testing.T) {
 		t.Errorf("fields grep missing reference marking:\n%s", out)
 	}
 
-	// The model source is filtered to the resource's shapes and greppable for
-	// the arnReference trait; the model name defaults to the controller alias.
-	out, err = tool.Run(context.Background(), target, grepArgs(t, sourceModel, "", "arnReference"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The model is consulted to build the index rather than exposed as a second
+	// grep source, and its name defaults to the controller alias.
 	if fetcher.gotModel != "acm" {
 		t.Errorf("model name = %q, want acm", fetcher.gotModel)
 	}
-	if !strings.Contains(out, "arnReference") {
-		t.Errorf("model grep missing arnReference:\n%s", out)
+	if len(referenceSources(fetcher)) != 1 {
+		t.Error("the reference issue should expose exactly one source")
+	}
+
+	// A nested field the CRD does not document (tags.key) picks up its
+	// description from the model, tagged with its provenance.
+	out, err = tool.Run(context.Background(), target, grepArgs(t, sourceFields, "", "tags.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "The tag key") || !strings.Contains(out, `"description_source":"model"`) {
+		t.Errorf("nested field did not gain a model-sourced description:\n%s", out)
+	}
+
+	// A top-level field the CRD does document keeps the CRD's text, and gains the
+	// model's validation pattern.
+	out, err = tool.Run(context.Background(), target, grepArgs(t, sourceFields, "", "roleARN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"description_source":"crd"`) {
+		t.Errorf("top-level field should keep its CRD description:\n%s", out)
+	}
+	if !strings.Contains(out, "arn:aws:iam::") {
+		t.Errorf("top-level field should gain the model's ARN pattern:\n%s", out)
+	}
+}
+
+// TestReferenceFieldsSourceDegradesWithoutModel covers the fetch failure path: the
+// index must still build, just without model-sourced descriptions, so a transient
+// network problem does not take out the issue's only source.
+func TestReferenceFieldsSourceDegradesWithoutModel(t *testing.T) {
+	root := t.TempDir()
+	repo := writeControllerRepo(t, root, "acm-controller")
+	// A fetcher with no models at all fails every fetch.
+	fetcher := &fakeModelFetcher{models: map[string]string{}}
+	load := loadReferenceFieldsSource(fetcher)
+
+	out, err := load(context.Background(), Target{Controller: "acm", Resource: "Certificate", RepoPath: repo}, "")
+	if err != nil {
+		t.Fatalf("index should still build without a model: %v", err)
+	}
+	if !strings.Contains(out, `"path":"roleARN"`) {
+		t.Errorf("index is missing its CRD-derived fields:\n%s", out)
+	}
+	if strings.Contains(out, `"description_source":"model"`) {
+		t.Error("no description should claim a model source when the model is unavailable")
 	}
 }

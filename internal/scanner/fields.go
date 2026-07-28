@@ -441,8 +441,19 @@ type referenceFieldRecord struct {
 	Path string `json:"path"`
 	// Type is the OpenAPI type of the field (string, object, array, …).
 	Type string `json:"type"`
-	// Description is the field's CRD description, if any.
+	// Description is the field's description. ACK only propagates descriptions
+	// into the CRD for top-level spec fields, so for a nested field this is
+	// filled from the service's Smithy model instead (see smithy.go).
 	Description string `json:"description,omitempty"`
+	// DescriptionSource records where Description came from, "crd" or "model", so
+	// the agent can weigh it (and so a missing description is distinguishable
+	// from an empty one). It is empty when no description was found in either.
+	DescriptionSource string `json:"description_source,omitempty"`
+	// Pattern is the validation pattern the API model constrains the field with,
+	// when it has one. For an identifier field this is frequently an ARN template
+	// that names the referenced service and resource type outright, which is the
+	// strongest available signal that the field is a cross-resource reference.
+	Pattern string `json:"pattern,omitempty"`
 	// IsReference reports whether generator.yaml already configures the field
 	// with a references block.
 	IsReference bool `json:"is_reference"`
@@ -477,7 +488,13 @@ type referenceFieldRecord struct {
 // reference is frequently immutable (a KMS key, IAM role, parent ID, or subnet
 // is set once) and can even be a sub-resource's primary key, so those markings
 // are surfaced on each record as signal rather than used to exclude candidates.
-func buildReferenceFieldIndex(repoPath, resource string) (string, error) {
+//
+// docs supplies the service's Smithy model documentation, joined onto any field
+// whose CRD description is empty — which is the overwhelming majority of nested
+// fields, since ACK only propagates descriptions to top-level spec fields. A zero
+// docs (the model could not be fetched or parsed) is valid and simply leaves those
+// descriptions empty, so a model outage degrades the index rather than failing it.
+func buildReferenceFieldIndex(repoPath, resource string, docs docIndex) (string, error) {
 	spec, records, err := walkedSpecFieldRecords(repoPath, resource)
 	if err != nil {
 		return "", err
@@ -490,7 +507,7 @@ func buildReferenceFieldIndex(repoPath, resource string) (string, error) {
 	refRecords := make([]referenceFieldRecord, len(records))
 	for i, r := range records {
 		norm := strings.ToLower(r.Path)
-		refRecords[i] = referenceFieldRecord{
+		rec := referenceFieldRecord{
 			Path:         r.Path,
 			Type:         r.Type,
 			Description:  r.Description,
@@ -498,9 +515,26 @@ func buildReferenceFieldIndex(repoPath, resource string) (string, error) {
 			IsImmutable:  m.immutable[norm],
 			IsPrimaryKey: m.primaryKey[norm],
 		}
+		if rec.Description != "" {
+			rec.DescriptionSource = descriptionSourceCRD
+		}
+		if doc, ok := docs.lookup(r.Path); ok {
+			rec.Pattern = doc.Pattern
+			if rec.Description == "" && doc.Description != "" {
+				rec.Description = doc.Description
+				rec.DescriptionSource = descriptionSourceModel
+			}
+		}
+		refRecords[i] = rec
 	}
 	return marshalRecordsPerLine(refRecords), nil
 }
+
+// Description provenance values recorded on a referenceFieldRecord.
+const (
+	descriptionSourceCRD   = "crd"
+	descriptionSourceModel = "model"
+)
 
 // fieldTypeRecord is one CRD spec field in the structural field index the
 // sub-resource issue greps: just the path, type, and description, with no

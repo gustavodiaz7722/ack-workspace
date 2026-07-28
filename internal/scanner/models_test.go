@@ -8,34 +8,87 @@ import (
 	"testing"
 )
 
-// testSmithyModel is a minimal Smithy model with a reference member (RoleArn,
-// whose target shape carries the arnReference trait), a non-reference member,
-// and an unrelated shape used to verify filtering.
+// testSmithyModel is a minimal Smithy model shaped like the real thing for the
+// purposes of the doc-index walk: a Create<Kind>Request root, a member whose
+// target shape carries an ARN pattern, a list of structures (to exercise the
+// list unwrap), a union, a renamed member, a second operation that a custom
+// field sources from, and an ambiguous member name (Description, declared twice
+// with different text) that the member-name fallback must refuse to use.
 const testSmithyModel = `{
   "smithy": "2.0",
   "shapes": {
-    "com.amazonaws.acm#CertificateDetail": {
+    "com.amazonaws.acm#CreateCertificateRequest": {
       "type": "structure",
       "members": {
-        "RoleArn": {
-          "target": "com.amazonaws.acm#RoleArnType",
-          "traits": { "smithy.api#documentation": "<p>The ARN of the IAM role.</p>" }
+        "CertificateName": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>The certificate name.</p>" }
         },
         "DomainName": {
           "target": "com.amazonaws.acm#DomainName",
           "traits": { "smithy.api#documentation": "<p>The domain name.</p>" }
+        },
+        "RoleArn": {
+          "target": "com.amazonaws.acm#RoleArnType",
+          "traits": { "smithy.api#documentation": "<p>The ARN of the IAM role.</p>" }
+        },
+        "Description": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>A certificate description.</p>" }
+        },
+        "Tags": { "target": "com.amazonaws.acm#TagList" },
+        "Options": { "target": "com.amazonaws.acm#OptionsUnion" }
+      }
+    },
+    "com.amazonaws.acm#AddPermissionRequest": {
+      "type": "structure",
+      "members": {
+        "SourceArn": {
+          "target": "com.amazonaws.acm#RoleArnType",
+          "traits": { "smithy.api#documentation": "<p>The ARN of the calling service.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#TagList": {
+      "type": "list",
+      "member": { "target": "com.amazonaws.acm#Tag" }
+    },
+    "com.amazonaws.acm#Tag": {
+      "type": "structure",
+      "members": {
+        "Key": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>The tag key.</p>" }
+        },
+        "Value": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>The tag value.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#OptionsUnion": {
+      "type": "union",
+      "members": {
+        "KmsKeyId": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>The ID of the KMS key.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#Unrelated": {
+      "type": "structure",
+      "members": {
+        "Description": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>Something else entirely.</p>" }
         }
       }
     },
     "com.amazonaws.acm#RoleArnType": {
       "type": "string",
-      "traits": { "aws.api#arnReference": {} }
+      "traits": { "smithy.api#pattern": "^arn:aws:iam::\\d{12}:role/.+$" }
     },
-    "com.amazonaws.acm#DomainName": { "type": "string" },
-    "com.amazonaws.acm#UnrelatedShape": {
-      "type": "structure",
-      "members": { "Foo": { "target": "com.amazonaws.acm#DomainName" } }
-    }
+    "com.amazonaws.acm#DomainName": { "type": "string" }
   }
 }`
 
@@ -92,33 +145,11 @@ func TestHTTPModelFetcherUnknownModel(t *testing.T) {
 	}
 }
 
-func TestFilterModelContent(t *testing.T) {
-	out := filterModelContent(testSmithyModel, "Certificate")
-
-	// The resource's structure is kept, and so is the target shape carrying the
-	// arnReference trait (pulled in one level out).
-	if !strings.Contains(out, "CertificateDetail") {
-		t.Errorf("filtered model dropped the resource structure:\n%s", out)
+func TestShortShapeName(t *testing.T) {
+	if got := shortShapeName("com.amazonaws.acm#CertificateDetail"); got != "CertificateDetail" {
+		t.Errorf("shortShapeName = %q, want CertificateDetail", got)
 	}
-	if !strings.Contains(out, "arnReference") || !strings.Contains(out, "RoleArnType") {
-		t.Errorf("filtered model dropped the arnReference target shape:\n%s", out)
-	}
-	// An unrelated structure whose name does not contain the resource kind is
-	// dropped.
-	if strings.Contains(out, "UnrelatedShape") {
-		t.Errorf("filtered model kept an unrelated shape:\n%s", out)
-	}
-}
-
-func TestFilterModelContentNoMatchFallsBack(t *testing.T) {
-	out := filterModelContent(testSmithyModel, "Nonexistent")
-	if out != testSmithyModel {
-		t.Error("with no matching shapes, the full model should be returned unchanged")
-	}
-}
-
-func TestFilterModelContentUnparseableFallsBack(t *testing.T) {
-	if out := filterModelContent("not json", "Certificate"); out != "not json" {
-		t.Error("unparseable content should be returned unchanged")
+	if got := shortShapeName("NoNamespace"); got != "NoNamespace" {
+		t.Errorf("shortShapeName = %q, want NoNamespace", got)
 	}
 }
