@@ -19,9 +19,21 @@ import (
 // region (for example a "global." or "eu." inference profile, or a newer model).
 const DefaultModelID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
-// defaultMaxTokens bounds the model's output per turn. Findings are compact, so
-// a few thousand tokens is ample headroom.
-const defaultMaxTokens = 4096
+// defaultMaxTokens bounds the model's output per turn.
+//
+// It is deliberately generous. Findings are not as compact as they look: a report
+// carries one entry per candidate field, each with a prose reasoning string, and a
+// wide resource can have dozens of candidates. At 4096 the model was observed
+// starting a real report on sagemaker's Domain resource and being cut off
+// mid-tool-use — and a truncated tool-use block arrives with an empty input
+// object, which is indistinguishable from a deliberate empty report. Raising the
+// ceiling removes the failure at its source; the agent loop also detects
+// truncation explicitly (see StopMaxTokens handling in Agent.Run) so it can never
+// be mistaken for a clean result again.
+//
+// Output tokens are billed as generated, not as reserved, so a high ceiling costs
+// nothing on the conversations that do not need it.
+const defaultMaxTokens = 16384
 
 // converseAPI is the slice of the Bedrock Runtime client the adapter uses. It is
 // an interface so the adapter's translation can be unit-tested with a fake, and

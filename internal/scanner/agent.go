@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Role identifies the author of a conversation Message. Only the two roles the
@@ -148,6 +149,31 @@ var ErrNoFindings = errors.New("agent ended the conversation without reporting f
 // tools without converging on an answer.
 var ErrMaxTurns = errors.New("agent exceeded the maximum number of conversation turns")
 
+// ErrInvalidFindings indicates the model called the report tool but never with
+// input satisfying the issue's output schema, so there are no findings that can
+// be trusted.
+//
+// This is deliberately an error rather than a tolerated empty report. A report
+// missing its required properties (in practice a bare "{}") decodes into a
+// findings struct with no entries, which every issue's Evaluate reads as "nothing
+// wrong here" and reports as a pass — a silent false clean bill on a resource
+// that was never actually assessed. Failing loudly is the only safe reading.
+//
+// Note this is distinct from a well-formed report with an empty findings list:
+// that is a legitimate pass, because the issue was assessed and found nothing.
+var ErrInvalidFindings = errors.New("agent reported findings that do not satisfy the issue's output schema")
+
+// ErrTruncated indicates the model's turn was cut off by the output token limit
+// before it produced a complete report.
+//
+// This is worth its own error because of how it presents: Bedrock returns the
+// partial turn with stop reason "max_tokens", and a tool-use block that was being
+// written when the limit hit arrives with an empty input object. Without
+// distinguishing it, a truncated report looks exactly like a deliberate empty one
+// and the resource reads as clean. If this error appears, the fix is a larger
+// defaultMaxTokens rather than anything about the issue or the controller.
+var ErrTruncated = errors.New("agent's turn was cut off by the model's output token limit")
+
 // Agent runs the Converse tool-use loop for one investigation. It is stateless
 // between runs; a fresh conversation is started for every (controller,
 // resource, issue) triple.
@@ -184,9 +210,17 @@ func (a *Agent) Run(ctx context.Context, target Target, system, prompt string, t
 		specs = append(specs, ToolSpec{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 		byName[t.Name] = t
 	}
+	// The report tool's input schema is the issue's output schema, so it is what a
+	// submitted report is validated against.
+	reportSchema := byName[reportTool].InputSchema
 
 	messages := []Message{{Role: RoleUser, Blocks: []Block{{Text: prompt}}}}
 	a.tr.start(system, prompt)
+
+	// rejection records why the most recent report was refused, so a conversation
+	// that never produces a valid one fails with that reason rather than the
+	// generic "no findings" or "max turns".
+	var rejection error
 
 	for turn := 0; turn < a.maxTurns; turn++ {
 		resp, err := a.client.Converse(ctx, ConverseRequest{System: system, Messages: messages, Tools: specs})
@@ -199,19 +233,56 @@ func (a *Agent) Run(ctx context.Context, target Target, system, prompt string, t
 
 		toolUses := collectToolUses(resp.Message)
 		if len(toolUses) == 0 {
-			// A terminal turn with no tool calls: the model chose to answer in
-			// prose instead of reporting through the report tool, so there are no
-			// structured findings to return.
-			a.tr.finish(nil, ErrNoFindings)
-			return nil, ErrNoFindings
+			// A terminal turn with no tool calls: either the model chose to answer
+			// in prose instead of reporting through the report tool, or its turn
+			// was cut off by the output token limit before it got as far as calling
+			// a tool. The two are distinguished so a truncation is diagnosed as
+			// one rather than misreported as the model declining to report.
+			outcome := ErrNoFindings
+			if resp.StopReason == StopMaxTokens {
+				outcome = ErrTruncated
+			}
+			err := terminalError(outcome, rejection)
+			a.tr.finish(nil, err)
+			return nil, err
 		}
 
-		// If the model called the report tool, capture its structured input and
+		// If the model called the report tool, validate its structured input and
 		// finish. It is checked before running any sibling tools because the
 		// report tool signals the conversation is complete.
-		if findings, ok := findReport(toolUses, reportTool); ok {
-			a.tr.finish(findings, nil)
-			return findings, nil
+		if use, ok := findReport(toolUses, reportTool); ok {
+			if err := validateReport(reportSchema, use.Input); err != nil {
+				// Refuse the report and tell the model why, so it can resubmit.
+				// A malformed report is a recoverable mistake, and the turn
+				// ceiling still bounds how long it may keep getting it wrong.
+				//
+				// The guidance is tailored to the cause. A report that was
+				// truncated at the output token limit is not missing properties
+				// because the model forgot them, it is missing them because it ran
+				// out of room, so telling it to "include every required property"
+				// invites an identical, identically truncated retry. Asking for a
+				// shorter report is the only instruction it can act on.
+				rejection = err
+				text := fmt.Sprintf("your report was rejected: %v. Call %s again with "+
+					"an argument object containing every required property.", err, reportTool)
+				if resp.StopReason == StopMaxTokens {
+					rejection = fmt.Errorf("%w (%v)", ErrTruncated, err)
+					text = fmt.Sprintf("your report was cut off by the output token limit "+
+						"before it was complete, so it arrived incomplete (%v). Call %s again with "+
+						"a substantially shorter report: keep each reasoning to one or two sentences "+
+						"and report only the fields you are confident about.", err, reportTool)
+				}
+				result := ToolResult{
+					ToolUseID: use.ID,
+					Text:      text,
+					IsError:   true,
+				}
+				a.tr.toolResult(turn+1, reportTool, result)
+				messages = append(messages, Message{Role: RoleUser, Blocks: []Block{{ToolResult: &result}}})
+				continue
+			}
+			a.tr.finish(use.Input, nil)
+			return use.Input, nil
 		}
 
 		// Otherwise run each requested tool and relay the results back as a
@@ -227,8 +298,66 @@ func (a *Agent) Run(ctx context.Context, target Target, system, prompt string, t
 		messages = append(messages, Message{Role: RoleUser, Blocks: results})
 	}
 
-	a.tr.finish(nil, ErrMaxTurns)
-	return nil, ErrMaxTurns
+	err := terminalError(ErrMaxTurns, rejection)
+	a.tr.finish(nil, err)
+	return nil, err
+}
+
+// terminalError chooses how to explain a conversation that ended without usable
+// findings. A rejected report is the more specific and more actionable cause, so
+// it takes precedence over the generic outcome.
+//
+// A rejection already identified as a truncation is returned as-is: it names both
+// the cause and the remedy, and re-wrapping it as a schema violation would bury
+// the one detail that matters (the output ceiling, not the issue definition).
+func terminalError(outcome, rejection error) error {
+	if rejection == nil {
+		return outcome
+	}
+	if errors.Is(rejection, ErrTruncated) {
+		return rejection
+	}
+	return fmt.Errorf("%w: %v", ErrInvalidFindings, rejection)
+}
+
+// validateReport checks a submitted report against the issue's output schema.
+//
+// It deliberately validates only that the payload is a JSON object carrying every
+// property the schema marks required, non-null. That is the failure actually
+// observed in practice — a model calling the report tool with "{}" — and catching
+// it is what stops an unassessed resource from being read as clean. Full JSON
+// Schema validation (types, enums, nested requirements) would need a schema
+// library and buy little: the remaining constraints are advisory guidance for the
+// model, and a partially-shaped report still carries real findings the issue's
+// Evaluate can read.
+func validateReport(schema, input json.RawMessage) error {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return fmt.Errorf("report is not a JSON object")
+	}
+
+	var s struct {
+		Required []string `json:"required"`
+	}
+	if len(schema) > 0 {
+		// An unparseable schema is a programming error in the issue definition,
+		// not something the model can fix, so there is nothing to enforce.
+		if err := json.Unmarshal(schema, &s); err != nil {
+			return nil
+		}
+	}
+
+	var missing []string
+	for _, name := range s.Required {
+		value, ok := payload[name]
+		if !ok || string(value) == "null" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("report is missing required properties: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // collectToolUses returns the ToolUse requests in a message, in order.
@@ -242,14 +371,16 @@ func collectToolUses(m Message) []ToolUse {
 	return uses
 }
 
-// findReport returns the input of the first call to the report tool, if present.
-func findReport(uses []ToolUse, reportTool string) (json.RawMessage, bool) {
+// findReport returns the first call to the report tool, if present. The whole
+// ToolUse is returned rather than just its input because a rejected report has to
+// be answered with a tool-result echoing its ID.
+func findReport(uses []ToolUse, reportTool string) (ToolUse, bool) {
 	for _, use := range uses {
 		if use.Name == reportTool {
-			return use.Input, true
+			return use, true
 		}
 	}
-	return nil, false
+	return ToolUse{}, false
 }
 
 // runTool executes one requested tool and packages its outcome as a ToolResult

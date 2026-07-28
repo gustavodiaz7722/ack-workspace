@@ -114,6 +114,40 @@ func TestScanFailedConversationIsReportedNotFatal(t *testing.T) {
 	}
 }
 
+func TestScanIncompleteReportIsNotAPass(t *testing.T) {
+	root := t.TempDir()
+	writeControllerRepo(t, root, "acm-controller")
+
+	// Observed against real controllers: the model calls the report tool with a
+	// bare object. That decodes to zero findings, which every issue's Evaluate
+	// would otherwise read as a pass — a silent clean bill on a resource that was
+	// never assessed. It must surface as a failure instead.
+	var buf bytes.Buffer
+	s := NewWithWriter(&smartClient{findings: json.RawMessage(`{}`)}, &buf)
+	if _, err := s.Scan(context.Background(), testApp(root), Options{
+		Controller: "acm", Resource: "Certificate", Issue: "1", JSON: true, Concurrency: 1,
+	}); err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	var got []Finding
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	if got[0].Verdict == string(VerdictPass) {
+		t.Error("an incomplete report must never be reported as a pass")
+	}
+	if got[0].Status != statusFailed {
+		t.Errorf("status = %q, want %q", got[0].Status, statusFailed)
+	}
+	if !strings.Contains(got[0].Error, "output schema") {
+		t.Errorf("error = %q, want it to explain the schema violation", got[0].Error)
+	}
+}
+
 func TestScanNoControllers(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewWithWriter(&smartClient{}, &buf)
