@@ -7,9 +7,11 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws-controllers-k8s/ack-workspace/internal/adder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/attributor"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/builder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
@@ -66,6 +68,11 @@ type recorder struct {
 	buildService    string
 	buildSDKVersion string
 
+	attributionCalled bool
+	attributionIDs    []string
+	attributionOpts   attributor.Options
+	attributionRegion string
+
 	summary workspace.Summary
 	runErr  error
 }
@@ -113,6 +120,13 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 			rec.buildCalled = true
 			rec.buildService = service
 			rec.buildSDKVersion = sdkVersion
+			return rec.summary, rec.runErr
+		},
+		attributionRun: func(ctx context.Context, a app.App, identifiers []string, opts attributor.Options, region string, out io.Writer) (workspace.Summary, error) {
+			rec.attributionCalled = true
+			rec.attributionIDs = identifiers
+			rec.attributionOpts = opts
+			rec.attributionRegion = region
 			return rec.summary, rec.runErr
 		},
 	}
@@ -169,6 +183,14 @@ func TestPrerequisiteNeedPerCommand(t *testing.T) {
 		{
 			name: "status needs git only",
 			args: []string{"status", "--" + config.FlagGitHubUser, "octocat"},
+			want: prereq.Need{Git: true},
+		},
+		{
+			// attribution reads the checked-out branch and lists remote refs, so it
+			// needs git. It must NOT declare Identity: --upstream and --repo remove
+			// the need for a fork owner, and declaring it would block those paths.
+			name: "attribution needs git only",
+			args: []string{"attribution", "ecr", "--" + config.FlagGitHubUser, "octocat"},
 			want: prereq.Need{Git: true},
 		},
 	}
@@ -452,7 +474,7 @@ func TestConfigGetMissingIdentityErrors(t *testing.T) {
 // Guard: the root command exposes the expected subcommands.
 func TestRootRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := map[string]bool{"init": false, "add": false, "refresh": false, "status": false, "remove": false, "release": false, "deploy": false, "build": false, "config": false}
+	want := map[string]bool{"init": false, "add": false, "refresh": false, "status": false, "remove": false, "release": false, "deploy": false, "build": false, "scan": false, "attribution": false, "config": false}
 	for _, c := range cmd.Commands() {
 		name := strings.Fields(c.Use)[0]
 		if _, ok := want[name]; ok {
@@ -698,5 +720,94 @@ func TestBuild_EmptyServiceSurfacesUsageError(t *testing.T) {
 	var ue *builder.UsageError
 	if !errors.As(err, &ue) {
 		t.Fatalf("error type = %T, want *builder.UsageError", err)
+	}
+}
+
+// --- attribution command -----------------------------------------------------
+
+func TestAttribution_ParsesIdentifiersAndFlags(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"attribution", "ecr", "s3-controller",
+		"--"+flagRef, "pr/42",
+		"--"+flagUpstream,
+		"--"+flagRegion, "us-west-2",
+		"--"+flagProject, "my-project",
+		"--"+flagBucket, "my-bucket",
+		"--"+flagRole, "my-role",
+		"--"+flagImage, "aws/codebuild/standard:8.0",
+		"--"+flagGoVersion, "1.24",
+		"--"+flagTimeout, "5m",
+		"--"+config.FlagGitHubUser, "octocat",
+	)
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.attributionCalled {
+		t.Fatal("attribution command did not delegate")
+	}
+	if got := strings.Join(rec.attributionIDs, ","); got != "ecr,s3-controller" {
+		t.Errorf("identifiers = %q, want \"ecr,s3-controller\"", got)
+	}
+	if rec.attributionRegion != "us-west-2" {
+		t.Errorf("region = %q, want us-west-2", rec.attributionRegion)
+	}
+
+	opts := rec.attributionOpts
+	if opts.Ref != "pr/42" {
+		t.Errorf("ref = %q, want pr/42 (normalization belongs to the component)", opts.Ref)
+	}
+	if !opts.Upstream {
+		t.Error("upstream flag was not passed through")
+	}
+	if opts.Timeout != 5*time.Minute {
+		t.Errorf("timeout = %v, want 5m", opts.Timeout)
+	}
+	if opts.Infra.Project != "my-project" || opts.Infra.Bucket != "my-bucket" || opts.Infra.Role != "my-role" {
+		t.Errorf("infrastructure overrides not passed through: %+v", opts.Infra)
+	}
+	if opts.Infra.Image != "aws/codebuild/standard:8.0" || opts.Infra.GoVersion != "1.24" {
+		t.Errorf("image/go-version overrides not passed through: %+v", opts.Infra)
+	}
+}
+
+func TestAttribution_DefaultsLeaveInfrastructureEmpty(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	if _, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"attribution", "ecr", "--"+config.FlagGitHubUser, "octocat"); err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	// Unset overrides must stay empty so the component (not the flag defaults)
+	// owns the defaulting, keeping one source of truth for the names.
+	if opts := rec.attributionOpts; opts.Infra != (attributor.Infrastructure{}) {
+		t.Errorf("Infrastructure = %+v, want zero value when no overrides are set", opts.Infra)
+	}
+}
+
+func TestAttribution_UsesGeneratedLabelForSummary(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{summary: workspace.Summary{Results: []workspace.Result{
+		{Repo: "ecr-controller", Outcome: workspace.OutcomeCreated, Reason: "updated"},
+	}}}
+	res, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"attribution", "ecr", "--"+config.FlagGitHubUser, "octocat")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if res.CreatedLabel() != "generated" {
+		t.Errorf("created label = %q, want \"generated\"", res.CreatedLabel())
+	}
+}
+
+func TestAttribution_EmptyIdentifierListSurfacesUsageError(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{runErr: &attributor.UsageError{Msg: "at least one service identifier (or 'all') is required"}}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"attribution", "--"+config.FlagGitHubUser, "octocat")
+	var ue *attributor.UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("error = %v (%T), want *attributor.UsageError", err, err)
 	}
 }

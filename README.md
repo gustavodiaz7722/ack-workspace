@@ -39,6 +39,10 @@ automates it.
   ahead/behind vs. upstream) as a table or JSON.
 - **`scan`** — investigate known issues in managed controllers with an Amazon Bedrock,
   tool-using agent, and report structured, per-field findings (a table or JSON).
+- **`attribution`** — regenerate a controller's `ATTRIBUTION.md` by running the upstream
+  `attribution-gen` tool on ephemeral AWS CodeBuild compute, then write the result into
+  your local checkout. The work runs remotely because generating the document needs the
+  public Go module proxy, which is unreachable from the Amazon corporate network.
 - **`config`** — view and persist your settings.
 
 Built-in safety:
@@ -392,6 +396,64 @@ ack-workspace scan sns --issue 1 --model <bedrock-model-id> --region us-west-2
 `--json` emits the full findings (including each finding's `terraform_field` and
 `ack_field_path`); `--debug` prints the complete conversation — every prompt, tool call,
 tool result, and the final report — to stderr, leaving stdout clean.
+
+### Generate a controller's ATTRIBUTION.md
+
+`attribution` regenerates a controller's `ATTRIBUTION.md` with the upstream
+[`attribution-gen`](https://github.com/awslabs/attribution-gen) tool and writes the result
+into your local checkout.
+
+The generation runs on ephemeral AWS CodeBuild compute, and that is a requirement rather
+than an optimization: building the document walks the module dependency graph and fetches
+every dependency from the public Go module proxy, which is blocked from inside the Amazon
+corporate network. CodeBuild runs the generator outside that network.
+
+```bash
+ack-workspace attribution ecr                 # your fork, current branch
+ack-workspace attribution ecr --ref pr/42     # a pull request
+ack-workspace attribution ecr --upstream      # the aws-controllers-k8s org
+ack-workspace attribution all                 # every managed controller
+```
+
+By default the build clones **your fork** at the controller's currently checked-out branch,
+so push your work first — the build reads the remote and cannot see unpushed commits. The
+command checks this before starting any compute and tells you if the ref is missing.
+
+On first use it provisions three resources in your AWS account and reuses them afterwards:
+
+| Resource | Default name | Purpose |
+|---|---|---|
+| IAM role | `ack-workspace-attribution-codebuild` | role CodeBuild assumes; scoped inline policy |
+| S3 bucket | `ack-workspace-attribution-<account>-<region>` | stages the generated document |
+| CodeBuild project | `ack-workspace-attribution` | runs `attribution-gen` |
+
+The project is generic and immutable: its source type is `NO_SOURCE` and its buildspec
+clones whichever repository a build names through environment overrides, so one project
+serves every controller and concurrent runs never interfere.
+
+Useful flags:
+
+```bash
+ack-workspace attribution ecr --dry-run                     # preview; provisions nothing
+ack-workspace attribution ecr --output /tmp/ATTRIBUTION.md  # write elsewhere
+ack-workspace attribution ecr --region us-west-2            # target a region
+ack-workspace attribution ecr --repo https://github.com/me/fork
+ack-workspace attribution ecr --image aws/codebuild/standard:8.0 --go-version 1.24
+ack-workspace attribution ecr --timeout 30m
+```
+
+> **Caution:** this command creates an IAM role, an S3 bucket, and a CodeBuild project in
+> whichever AWS account your credentials resolve to, and each run is a billable build.
+> `--dry-run` previews all of it without creating anything. `attribution all` starts one
+> build per controller.
+
+A generated document is only written if it starts with `# Open Source Software Attribution`,
+so a failed or truncated build can never overwrite a good checked-in file. The write is
+atomic, and an unchanged document is reported as `already up to date` rather than rewritten.
+
+If `--go-version` is overridden, it must be a runtime the chosen image actually ships. See
+[AWS CodeBuild available runtimes](https://docs.aws.amazon.com/codebuild/latest/userguide/available-runtimes.html);
+`standard:7.0` provides golang 1.20 through 1.24.
 
 ### Preview any command
 

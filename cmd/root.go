@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws-controllers-k8s/ack-workspace/internal/adder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/attributor"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/builder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
@@ -134,6 +135,11 @@ type deps struct {
 	// findings at out, and (when debugOut is non-nil) its conversation transcript
 	// at debugOut.
 	scanRun func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error)
+	// attributionRun runs the Controller_Attributor for the attribution command:
+	// it generates each controller's ATTRIBUTION.md on ephemeral CodeBuild compute
+	// and writes the result into the local checkout. The writer receives the
+	// notice describing any AWS resource that had to be provisioned.
+	attributionRun func(ctx context.Context, a app.App, identifiers []string, opts attributor.Options, region string, out io.Writer) (workspace.Summary, error)
 }
 
 // defaultDeps returns the production wiring: the real prerequisite checker and
@@ -189,6 +195,13 @@ func defaultDeps() deps {
 			}
 			return s.Scan(ctx, a, opts)
 		},
+		attributionRun: func(ctx context.Context, a app.App, identifiers []string, opts attributor.Options, region string, out io.Writer) (workspace.Summary, error) {
+			backend, err := attributor.NewCodeBuildBackend(ctx, region)
+			if err != nil {
+				return workspace.Summary{}, err
+			}
+			return attributor.NewWithWriter(backend, out).Generate(ctx, a, identifiers, opts)
+		},
 	}
 }
 
@@ -230,6 +243,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newDeployCommand(d, res),
 		newBuildCommand(d, res),
 		newScanCommand(d, res),
+		newAttributionCommand(d, res),
 		newConfigCommand(),
 	)
 	return cmd, res
