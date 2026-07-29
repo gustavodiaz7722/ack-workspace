@@ -37,19 +37,29 @@ func setFlagFor(args []string, assignment string) string {
 	return ""
 }
 
+// hasArg reports whether args contains a.
+func hasArg(args []string, a string) bool {
+	for _, got := range args {
+		if got == a {
+			return true
+		}
+	}
+	return false
+}
+
 func TestHelmUpgradeArgs_TagUsesSetString(t *testing.T) {
 	// An all-digit commit SHA is the regression case: with plain --set, Helm
 	// coerces it to a number and the chart's values schema rejects it with
 	// "got number, want string".
 	const tag = "4881291"
-	args := helmUpgradeArgs(
-		"/charts/ecr",
-		"ack-system",
-		"ack-ecr-controller",
-		"123456789012.dkr.ecr.us-west-2.amazonaws.com/ecr-controller",
-		tag,
-		"us-west-2",
-	)
+	args := helmUpgradeArgs(DeployParams{
+		ChartDir:  "/charts/ecr",
+		Namespace: "ack-system",
+		Release:   "ack-ecr-controller",
+		ImageRepo: "123456789012.dkr.ecr.us-west-2.amazonaws.com/ecr-controller",
+		ImageTag:  tag,
+		Region:    "us-west-2",
+	})
 
 	if got := setFlagFor(args, "image.tag="+tag); got != "--set-string" {
 		t.Errorf("image.tag should be passed with --set-string, got %q", got)
@@ -62,14 +72,14 @@ func TestHelmUpgradeArgs_TagUsesSetString(t *testing.T) {
 }
 
 func TestHelmUpgradeArgs_CoreArgs(t *testing.T) {
-	args := helmUpgradeArgs(
-		"/charts/ecr",
-		"ack-test",
-		"ack-ecr-controller",
-		"repo/ecr-controller",
-		"dev",
-		"eu-central-1",
-	)
+	args := helmUpgradeArgs(DeployParams{
+		ChartDir:  "/charts/ecr",
+		Namespace: "ack-test",
+		Release:   "ack-ecr-controller",
+		ImageRepo: "repo/ecr-controller",
+		ImageTag:  "dev",
+		Region:    "eu-central-1",
+	})
 
 	if len(args) < 4 || args[0] != "upgrade" || args[1] != "--install" {
 		t.Fatalf("expected helm upgrade --install prefix, got %v", args)
@@ -90,13 +100,54 @@ func TestHelmUpgradeArgs_CoreArgs(t *testing.T) {
 		t.Errorf("expected aws.region via --set, got args %v", args)
 	}
 
-	found := false
+	if !hasArg(args, "--create-namespace") {
+		t.Errorf("expected --create-namespace, got %v", args)
+	}
+}
+
+// TestHelmUpgradeArgs_NoServiceAccountByDefault pins that an unset
+// ServiceAccount leaves the chart's own service account handling untouched, so
+// the default deploy behavior is unchanged.
+func TestHelmUpgradeArgs_NoServiceAccountByDefault(t *testing.T) {
+	args := helmUpgradeArgs(DeployParams{
+		ChartDir:  "/charts/ecr",
+		Namespace: "ack-system",
+		Release:   "ack-ecr-controller",
+		ImageRepo: "repo/ecr-controller",
+		ImageTag:  "dev",
+		Region:    "us-west-2",
+	})
+
 	for _, a := range args {
-		if a == "--create-namespace" {
-			found = true
+		if a == "serviceAccount.create=false" || len(a) > 19 && a[:19] == "serviceAccount.name" {
+			t.Errorf("expected no serviceAccount overrides when ServiceAccount is empty, got %v", args)
 		}
 	}
-	if !found {
-		t.Errorf("expected --create-namespace, got %v", args)
+}
+
+// TestHelmUpgradeArgs_ServiceAccountReusesExisting covers the credential
+// regression: the chart-created service account has no IRSA annotation and is
+// not the account an EKS Pod Identity association is attached to, so a
+// controller deployed under it starts with no AWS credentials. Naming an
+// existing account must both disable creation and reference that name.
+func TestHelmUpgradeArgs_ServiceAccountReusesExisting(t *testing.T) {
+	const sa = "ack-controller"
+	args := helmUpgradeArgs(DeployParams{
+		ChartDir:       "/charts/ecr",
+		Namespace:      "ack-system",
+		Release:        "ack-ecr-controller",
+		ImageRepo:      "repo/ecr-controller",
+		ImageTag:       "dev",
+		Region:         "us-west-2",
+		ServiceAccount: sa,
+	})
+
+	if setFlagFor(args, "serviceAccount.create=false") != "--set" {
+		t.Errorf("expected serviceAccount.create=false via --set, got args %v", args)
+	}
+	// The name goes through --set-string so an all-digit name is not coerced to
+	// a number, matching the image.tag handling.
+	if got := setFlagFor(args, "serviceAccount.name="+sa); got != "--set-string" {
+		t.Errorf("serviceAccount.name should be passed with --set-string, got %q in %v", got, args)
 	}
 }

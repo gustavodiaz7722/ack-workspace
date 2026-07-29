@@ -16,6 +16,9 @@ const (
 	// flagRepository overrides the ECR repository name (default
 	// "<service>-controller").
 	flagRepository = "repository"
+	// flagServiceAccount names an existing service account for the controller to
+	// run under, instead of the one the chart creates.
+	flagServiceAccount = "service-account"
 )
 
 // newDeployCommand builds the `deploy` subcommand, which builds a single service
@@ -51,6 +54,12 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			"is named after the controller; override these with --image-tag and --repository. Use " +
 			"--namespace to install into a namespace other than ack-system and --region to push to " +
 			"and configure a region other than the one resolved from your AWS configuration.\n\n" +
+			"By default the chart creates its own service account, which carries no AWS credential " +
+			"binding. If the cluster grants controllers credentials through IRSA (an " +
+			"eks.amazonaws.com/role-arn annotation) or an EKS Pod Identity association, both of which " +
+			"attach to a specific service account, pass --service-account to run under that account " +
+			"instead; otherwise the controller starts with no credentials and exits with \"unable to " +
+			"determine account info\".\n\n" +
 			"deploy installs onto whatever cluster your current kubeconfig context points at; verify " +
 			"the context before running. Pass --dry-run to preview the steps without building, " +
 			"pushing, or modifying the cluster.",
@@ -65,6 +74,7 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			imageTag, _ := cmd.Flags().GetString(flagImageTag)
 			repository, _ := cmd.Flags().GetString(flagRepository)
 			region, _ := cmd.Flags().GetString(flagRegion)
+			serviceAccount, _ := cmd.Flags().GetString(flagServiceAccount)
 
 			// A missing service identifier is validated by the Controller_Deployer
 			// (which returns a *deployer.UsageError) so the rule is enforced in a
@@ -74,7 +84,7 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 				service = args[0]
 			}
 
-			summary, err := d.deployRun(cmdContext(cmd), a, service, namespace, imageTag, repository, region)
+			summary, err := d.deployRun(cmdContext(cmd), a, service, namespace, imageTag, repository, region, serviceAccount)
 			if err != nil {
 				return err
 			}
@@ -86,5 +96,6 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 	cmd.Flags().String(flagImageTag, "", "image tag to build and deploy (default the controller's HEAD short SHA)")
 	cmd.Flags().String(flagRepository, "", "ECR repository name (default \"<service>-controller\")")
 	cmd.Flags().String(flagRegion, "", "AWS region to push to and configure the controller for (default the resolved AWS config region)")
+	cmd.Flags().String(flagServiceAccount, "", "run the controller under this existing service account instead of one created by the chart (use when the cluster binds AWS credentials to a specific service account via IRSA or EKS Pod Identity)")
 	return cmd
 }
