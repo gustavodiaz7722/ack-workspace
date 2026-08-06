@@ -96,10 +96,8 @@ type Cluster interface {
 	// CurrentContext returns the active kubeconfig context name (the cluster a
 	// deploy targets).
 	CurrentContext(ctx context.Context) (string, error)
-	// Deploy installs or upgrades the controller's Helm chart at chartDir into
-	// namespace under release, pointing the deployment at imageRepo:imageTag and
-	// configuring the controller for region.
-	Deploy(ctx context.Context, chartDir, namespace, release, imageRepo, imageTag, region string) error
+	// Deploy installs or upgrades the controller's Helm chart as described by p.
+	Deploy(ctx context.Context, p DeployParams) error
 }
 
 // Options controls deploy behavior. All fields are optional; each falls back to
@@ -119,6 +117,40 @@ type Options struct {
 	// configured for. It defaults to the region resolved from the active AWS
 	// configuration when empty.
 	Region string
+	// ServiceAccount names an existing Kubernetes service account for the
+	// controller to run under, instead of the one the chart creates by default
+	// ("ack-<service>-controller").
+	//
+	// This matters because the chart's own service account carries no AWS
+	// credential binding: it has no eks.amazonaws.com/role-arn annotation, and an
+	// EKS Pod Identity association is attached to a specific service account
+	// name. On a cluster that grants the controller credentials through either
+	// mechanism, a chart-created service account leaves the controller with no
+	// way to reach AWS and it exits at startup with "unable to determine account
+	// info: ... NoCredentialProviders". Pointing the deploy at the service account
+	// the cluster already binds credentials to avoids that.
+	ServiceAccount string
+}
+
+// DeployParams describes one `helm upgrade --install` of a controller chart. It
+// groups what was previously a long positional argument list so call sites stay
+// readable as deploy grows more knobs.
+type DeployParams struct {
+	// ChartDir is the path to the controller's Helm chart.
+	ChartDir string
+	// Namespace is the namespace the controller is installed into.
+	Namespace string
+	// Release is the Helm release name.
+	Release string
+	// ImageRepo is the image repository (registry host plus repository name).
+	ImageRepo string
+	// ImageTag is the tag of the image to deploy.
+	ImageTag string
+	// Region is the AWS region the controller is configured for.
+	Region string
+	// ServiceAccount, when non-empty, makes the deploy reuse an existing service
+	// account of that name rather than letting the chart create its own.
+	ServiceAccount string
 }
 
 // Deployer implements the Controller_Deployer.
@@ -239,9 +271,19 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 	imageRepo := registryHost + "/" + repoName
 	imageRef := imageRepo + ":" + tag
 
+	params := DeployParams{
+		ChartDir:       chartPath,
+		Namespace:      namespace,
+		Release:        release,
+		ImageRepo:      imageRepo,
+		ImageTag:       tag,
+		Region:         region,
+		ServiceAccount: strings.TrimSpace(opts.ServiceAccount),
+	}
+
 	// Dry-run: report the steps that would be taken without mutating anything.
 	if ap.DryRun {
-		return d.preview(name, kubeContext, imageRef, namespace, release)
+		return d.preview(name, kubeContext, imageRef, params)
 	}
 
 	// 1. Ensure the ECR repository exists, creating it in the current account
@@ -262,7 +304,7 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 	}
 
 	// 4. Install or upgrade the controller on the current cluster.
-	if err := d.cluster.Deploy(ctx, chartPath, namespace, release, imageRepo, tag, region); err != nil {
+	if err := d.cluster.Deploy(ctx, params); err != nil {
 		return failed(name, fmt.Errorf("deploying to cluster %q: %w", kubeContext, err))
 	}
 
@@ -276,12 +318,22 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 }
 
 // preview computes the deploy steps for a dry-run without mutating anything.
-func (d *Deployer) preview(name, kubeContext, imageRef, namespace, release string) workspace.Result {
+func (d *Deployer) preview(name, kubeContext, imageRef string, p DeployParams) workspace.Result {
+	// Name the service account the controller will run under, since that decides
+	// whether it can reach AWS at all.
+	sa := fmt.Sprintf("chart-created service account %q", chartServiceAccount(p.Release))
+	if p.ServiceAccount != "" {
+		sa = fmt.Sprintf("existing service account %q", p.ServiceAccount)
+	}
 	reason := fmt.Sprintf(
-		"would ensure ECR repository, build %s from local source, push it, and helm upgrade --install %s into namespace %s on cluster %q",
-		imageRef, release, namespace, kubeContext)
+		"would ensure ECR repository, build %s from local source, push it, and helm upgrade --install %s into namespace %s on cluster %q using %s",
+		imageRef, p.Release, p.Namespace, kubeContext, sa)
 	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
 }
+
+// chartServiceAccount returns the service account name the controller chart
+// creates by default for the given release, which matches the release name.
+func chartServiceAccount(release string) string { return release }
 
 // execBuilder is the production Builder. It invokes the code-generator image
 // build script with the working directory set to the code-generator directory
@@ -386,13 +438,14 @@ func (execCluster) CurrentContext(ctx context.Context) (string, error) {
 }
 
 // Deploy installs or upgrades the controller's Helm chart with
-// `helm upgrade --install`, overriding the image repository and tag and setting
-// the controller's AWS region. It creates the target namespace when necessary.
-func (execCluster) Deploy(ctx context.Context, chartDir, namespace, release, imageRepo, imageTag, region string) error {
-	args := helmUpgradeArgs(chartDir, namespace, release, imageRepo, imageTag, region)
+// `helm upgrade --install`, overriding the image repository and tag, setting the
+// controller's AWS region, and optionally binding it to an existing service
+// account. It creates the target namespace when necessary.
+func (execCluster) Deploy(ctx context.Context, p DeployParams) error {
+	args := helmUpgradeArgs(p)
 	cmd := exec.CommandContext(ctx, "helm", args...)
 	if out, err := runCombined(cmd); err != nil {
-		return annotate(fmt.Sprintf("helm upgrade --install %s", release), out, err)
+		return annotate(fmt.Sprintf("helm upgrade --install %s", p.Release), out, err)
 	}
 	return nil
 }
@@ -405,15 +458,27 @@ func (execCluster) Deploy(ctx context.Context, chartDir, namespace, release, ima
 // "4881291", or a semver-like "1.2") are not type-coerced by Helm into a number
 // and rejected by the chart's values schema, which requires image.tag to be a
 // string.
-func helmUpgradeArgs(chartDir, namespace, release, imageRepo, imageTag, region string) []string {
-	return []string{
-		"upgrade", "--install", release, chartDir,
-		"--namespace", namespace,
+//
+// When p.ServiceAccount is set, the chart is told not to create a service
+// account and to reference the named one instead. The name goes through
+// `--set-string` for the same coercion reason as the tag: an all-digit name is a
+// valid Kubernetes object name but Helm would otherwise turn it into a number.
+func helmUpgradeArgs(p DeployParams) []string {
+	args := []string{
+		"upgrade", "--install", p.Release, p.ChartDir,
+		"--namespace", p.Namespace,
 		"--create-namespace",
-		"--set", "image.repository=" + imageRepo,
-		"--set-string", "image.tag=" + imageTag,
-		"--set", "aws.region=" + region,
+		"--set", "image.repository=" + p.ImageRepo,
+		"--set-string", "image.tag=" + p.ImageTag,
+		"--set", "aws.region=" + p.Region,
 	}
+	if p.ServiceAccount != "" {
+		args = append(args,
+			"--set", "serviceAccount.create=false",
+			"--set-string", "serviceAccount.name="+p.ServiceAccount,
+		)
+	}
+	return args
 }
 
 // runCombined runs cmd capturing both stdout and stderr into a single buffer and
