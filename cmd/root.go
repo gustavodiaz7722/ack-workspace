@@ -135,6 +135,11 @@ type deps struct {
 	// findings at out, and (when debugOut is non-nil) its conversation transcript
 	// at debugOut.
 	scanRun func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error)
+	// candidatesRun runs the scanner's Indexer for the candidates command: it
+	// emits the deterministic cross-resource-reference candidate index. Records
+	// are written to out and progress/suppression notes to errOut, so stdout
+	// stays machine-readable.
+	candidatesRun func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error)
 	// attributionRun runs the Controller_Attributor for the attribution command:
 	// it generates each controller's ATTRIBUTION.md on ephemeral CodeBuild compute
 	// and writes the result into the local checkout. The writer receives the
@@ -196,6 +201,9 @@ func defaultDeps() deps {
 			}
 			return s.Scan(ctx, a, opts)
 		},
+		candidatesRun: func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error) {
+			return scanner.NewIndexer(a.Config.Token, out, errOut).Candidates(ctx, a, opts)
+		},
 		attributionRun: func(ctx context.Context, a app.App, identifiers []string, opts attributor.Options, region string, out io.Writer) (workspace.Summary, error) {
 			backend, err := attributor.NewCodeBuildBackend(ctx, region)
 			if err != nil {
@@ -244,6 +252,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newDeployCommand(d, res),
 		newBuildCommand(d, res),
 		newScanCommand(d, res),
+		newCandidatesCommand(d, res),
 		newAttributionCommand(d, res),
 		newConfigCommand(),
 	)

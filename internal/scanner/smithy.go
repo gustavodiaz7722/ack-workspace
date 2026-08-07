@@ -3,8 +3,10 @@ package scanner
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/aws-controllers-k8s/pkg/names"
@@ -106,18 +108,83 @@ func (d docIndex) lookup(path string) (smithyDoc, bool) {
 	return doc, ok
 }
 
+// Documentation join provenance reported by lookupOrigin.
+const (
+	// joinOriginPath means the documentation was reached by structurally walking
+	// the resource's operation input shapes, so the path identifies exactly which
+	// shape's member it came from. A description joined this way cannot belong to
+	// an unrelated shape.
+	joinOriginPath = "path"
+	// joinOriginMember means the structural walk did not reach the field and the
+	// documentation came from the member-name fallback. The name carries a single
+	// meaning across the whole model, so the description is not arbitrary, but the
+	// shape it was taken from is not confirmed by the field's position.
+	joinOriginMember = "member"
+)
+
+// lookupOrigin is lookup with the join provenance reported alongside the
+// documentation, so a consumer can tell a structurally resolved description
+// (right by construction) from one recovered via the member-name fallback.
+func (d docIndex) lookupOrigin(path string) (smithyDoc, string, bool) {
+	if doc, ok := d.byPath[path]; ok {
+		return doc, joinOriginPath, true
+	}
+	if canonical, ok := d.lowerPath[strings.ToLower(path)]; ok {
+		if doc, ok := d.byPath[canonical]; ok {
+			return doc, joinOriginPath, true
+		}
+	}
+	leaf := path
+	if i := strings.LastIndex(leaf, "."); i >= 0 {
+		leaf = leaf[i+1:]
+	}
+	if doc, ok := d.byMember[leaf]; ok {
+		return doc, joinOriginMember, true
+	}
+	return smithyDoc{}, "", false
+}
+
 // buildDocIndex resolves the model documentation for one resource of one
 // controller: it decodes the model, determines which operation input shapes feed
 // the resource's spec, walks them into CRD-shaped field paths, and builds the
 // unambiguous member-name fallback.
 func buildDocIndex(modelJSON, repoPath, resource string) (docIndex, error) {
+	md, err := newModelDocs(modelJSON)
+	if err != nil {
+		return docIndex{}, err
+	}
+	return md.indexFor(repoPath, resource)
+}
+
+// modelDocs is a decoded Smithy model together with its member-name fallback
+// index. Both are per-model rather than per-resource, and both are expensive —
+// decoding is a multi-megabyte JSON unmarshal for the larger services and the
+// fallback walks every member of every shape — so a caller indexing several
+// resources of one controller builds this once and calls indexFor per resource.
+type modelDocs struct {
+	model      smithyModel
+	memberDocs map[string]smithyDoc
+}
+
+// newModelDocs decodes a raw Smithy model and precomputes its member-name
+// fallback index.
+func newModelDocs(modelJSON string) (modelDocs, error) {
 	var m smithyModel
 	if err := json.Unmarshal([]byte(modelJSON), &m); err != nil {
-		return docIndex{}, fmt.Errorf("parsing smithy model: %w", err)
+		return modelDocs{}, fmt.Errorf("parsing smithy model: %w", err)
 	}
 	if len(m.Shapes) == 0 {
-		return docIndex{}, fmt.Errorf("smithy model declares no shapes")
+		return modelDocs{}, fmt.Errorf("smithy model declares no shapes")
 	}
+	return modelDocs{model: m, memberDocs: unambiguousMemberDocs(m)}, nil
+}
+
+// indexFor resolves the documentation for one resource of one controller off an
+// already-decoded model: it determines which operation input shapes feed the
+// resource's spec, walks them into CRD-shaped field paths, and reuses the
+// model-wide member-name fallback.
+func (md modelDocs) indexFor(repoPath, resource string) (docIndex, error) {
+	m := md.model
 
 	cfg, err := loadSpecSources(repoPath, resource)
 	if err != nil {
@@ -126,11 +193,30 @@ func buildDocIndex(modelJSON, repoPath, resource string) (docIndex, error) {
 
 	idx := docIndex{
 		byPath:    map[string]smithyDoc{},
-		byMember:  unambiguousMemberDocs(m),
+		byMember:  md.memberDocs,
 		lowerPath: map[string]string{},
 	}
 	for _, root := range m.rootShapes(resource, cfg.operations) {
-		m.walkShape(root, "", 0, map[string]bool{}, cfg.renames, idx.byPath)
+		m.walkShape(root, "", 0, map[string]bool{}, cfg.renames[operationForShape(root)], idx.byPath)
+	}
+	// Graft each custom field's shape onto its own path prefix. Walking these
+	// after the roots means a root that already documented a path keeps it, and
+	// passing the renames is harmless because walkShape only applies them at the
+	// top level of a root (path == "").
+	prefixes := make([]string, 0, len(cfg.mounts))
+	for prefix := range cfg.mounts {
+		prefixes = append(prefixes, prefix)
+	}
+	sort.Strings(prefixes)
+	for _, prefix := range prefixes {
+		full, ok := m.findShape(cfg.mounts[prefix])
+		if !ok {
+			continue
+		}
+		// No renames apply inside a mounted shape: generator.yaml renames are
+		// scoped to an operation's *input* fields, and walkShape only consults them
+		// at a root's top level (path == "") anyway.
+		m.walkShape(full, prefix, 0, map[string]bool{}, nil, idx.byPath)
 	}
 
 	// Index paths by their lowercased form, dropping any that collide so a
@@ -170,6 +256,11 @@ func (m smithyModel) rootShapes(resource string, operations []string) []string {
 		}
 	}
 
+	createNames := map[string]bool{}
+	for _, suffix := range []string{"Request", "Input", "Message"} {
+		createNames[strings.ToLower("Create"+resource+suffix)] = true
+	}
+
 	var roots []string
 	for name, shape := range m.Shapes {
 		if shape.Type != "structure" && shape.Type != "union" {
@@ -179,7 +270,69 @@ func (m smithyModel) rootShapes(resource string, operations []string) []string {
 			roots = append(roots, name)
 		}
 	}
+	// Order the roots deterministically, Create first. Several roots can
+	// contribute the same field path (a Describe input often repeats a Create
+	// input's members under a different name), and walkShape resolves that by
+	// keeping whichever arrived first with documentation. Iterating the shape map
+	// directly would make that resolution depend on Go's map order, so two runs
+	// over an unchanged repo could disagree — which would defeat the point of a
+	// reproducible index. Create wins ties because it is the operation that
+	// actually defines the spec.
+	sort.Slice(roots, func(i, j int) bool {
+		ci := createNames[strings.ToLower(shortShapeName(roots[i]))]
+		cj := createNames[strings.ToLower(shortShapeName(roots[j]))]
+		if ci != cj {
+			return ci
+		}
+		return roots[i] < roots[j]
+	})
 	return roots
+}
+
+// operationForShape recovers the operation name from its input shape's name by
+// stripping the request-shape suffix ("CreateLogGroupRequest" ->
+// "CreateLogGroup"), lowercased for use as a renames key.
+func operationForShape(shapeName string) string {
+	short := shortShapeName(shapeName)
+	for _, suffix := range []string{"Request", "Input", "Message"} {
+		if base := strings.TrimSuffix(short, suffix); base != short {
+			return strings.ToLower(base)
+		}
+	}
+	return strings.ToLower(short)
+}
+
+// findShape resolves a bare shape name from generator.yaml to its fully
+// qualified name in the model, comparing case-insensitively on the local part.
+//
+// It also reconciles the operation-shape naming split: generator.yaml uses the
+// older SDK's "<Operation>Input" convention (cloudwatchlogs declares
+// `list_of: PutSubscriptionFilterInput`) while the Smithy models publish
+// "<Operation>Request" (or, rarely, "<Operation>Message"). A name ending in one
+// of those suffixes is retried with the others, so a custom field naming an
+// operation shape resolves either way. Plain struct names (IpPermission,
+// NetworkAclAssociation) match on the first attempt.
+func (m smithyModel) findShape(name string) (string, bool) {
+	candidates := []string{name}
+	for _, suffix := range []string{"Input", "Request", "Message"} {
+		if base := strings.TrimSuffix(name, suffix); base != name {
+			for _, alt := range []string{"Request", "Input", "Message"} {
+				if alt != suffix {
+					candidates = append(candidates, base+alt)
+				}
+			}
+			break
+		}
+	}
+	for _, want := range candidates {
+		lower := strings.ToLower(want)
+		for full := range m.Shapes {
+			if strings.ToLower(shortShapeName(full)) == lower {
+				return full, true
+			}
+		}
+	}
+	return "", false
 }
 
 // walkShape descends a structure or union shape, recording one entry per member
@@ -209,7 +362,7 @@ func (m smithyModel) walkShape(
 		// the top level of a root shape is subject to them.
 		effective := memberName
 		if path == "" {
-			if renamed, ok := renames[memberName]; ok {
+			if renamed, ok := renames[strings.ToLower(memberName)]; ok {
 				effective = renamed
 			}
 		}
@@ -331,18 +484,65 @@ func traitDoc(traits map[string]json.RawMessage) string {
 	if json.Unmarshal(raw, &doc) != nil {
 		return ""
 	}
-	return strings.TrimSpace(doc)
+	return cleanDoc(doc)
+}
+
+// cleanDoc renders a Smithy documentation trait as plain prose: AWS writes these
+// as HTML fragments (`<p>The ARN of an IAM role...</p>`, with `<code>` and `<a>`
+// markup inline), and the tags are noise in an index a human or a model reads.
+// Tags are dropped, entities unescaped, and runs of whitespace collapsed so a
+// description occupies one line.
+func cleanDoc(doc string) string {
+	var b strings.Builder
+	b.Grow(len(doc))
+	depth := 0
+	for _, r := range doc {
+		switch {
+		case r == '<':
+			depth++
+		case r == '>':
+			if depth > 0 {
+				depth--
+			}
+			// A tag boundary separates words that would otherwise run together
+			// ("...role.</p><p>You must..."), so emit a space in its place.
+			b.WriteByte(' ')
+		case depth == 0:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(html.UnescapeString(b.String())), " ")
 }
 
 // specSources is the generator.yaml configuration that affects how model members
 // map onto CRD field paths for one resource.
 type specSources struct {
-	// renames maps an original operation input field name to the name ACK
-	// exposes (generator.yaml renames.operations.<Op>.input_fields).
-	renames map[string]string
+	// renames maps a lowercased operation name to that operation's input-field
+	// renames (generator.yaml renames.operations.<Op>.input_fields), themselves
+	// keyed by lowercased original member name.
+	//
+	// The renames must stay scoped to their operation. Different operations
+	// legitimately rename *different* members onto the same ACK field —
+	// cloudwatchlogs maps CreateLogGroup's LogGroupName and DescribeLogGroups's
+	// LogGroupNamePrefix both onto Name — so a flattened map would apply one
+	// operation's rename while walking another's input shape and attribute the
+	// wrong member's documentation to the field.
+	renames map[string]map[string]string
 	// operations are the additional operations whose input shapes contribute spec
 	// fields, declared by custom fields as `from: {operation: ...}`.
 	operations []string
+	// mounts maps a CRD field path prefix (the generator.yaml field name in
+	// CamelLower) to the model shape whose members ACK grafts onto that prefix. A
+	// custom field declared `custom_field: {list_of: X}` or `{map_of: X}` names a
+	// *shape*, not an operation, and its members become a nested subtree of the
+	// spec — cloudwatchlogs LogGroup's subscriptionFilters.* comes from
+	// PutSubscriptionFilterInput this way.
+	//
+	// These subtrees matter more than their count suggests: they are entirely
+	// nested, so the CRD carries no description for any of them, and they are
+	// where cross-resource references concentrate. Without the mount the walk
+	// never reaches them and every field in them is judgeable by name alone.
+	mounts map[string]string
 }
 
 // generatorSpecSources decodes the two parts of generator.yaml that determine
@@ -353,6 +553,10 @@ type generatorSpecSources struct {
 			From *struct {
 				Operation string `yaml:"operation"`
 			} `yaml:"from"`
+			CustomField *struct {
+				ListOf string `yaml:"list_of"`
+				MapOf  string `yaml:"map_of"`
+			} `yaml:"custom_field"`
 		} `yaml:"fields"`
 		Renames *struct {
 			Operations map[string]struct {
@@ -375,20 +579,35 @@ func loadSpecSources(repoPath, resource string) (specSources, error) {
 		return specSources{}, fmt.Errorf("parsing generator.yaml: %w", err)
 	}
 
-	out := specSources{renames: map[string]string{}}
+	out := specSources{renames: map[string]map[string]string{}, mounts: map[string]string{}}
 	rc, ok := g.Resources[resource]
 	if !ok {
 		return out, nil
 	}
 	if rc.Renames != nil {
-		for _, op := range rc.Renames.Operations {
+		for opName, op := range rc.Renames.Operations {
+			byMember := map[string]string{}
 			for original, renamed := range op.InputFields {
-				out.renames[original] = renamed
+				// Keyed lowercased: generator.yaml names the field in the API's
+				// PascalCase ("LogGroupName") while models are inconsistent about
+				// member casing — cloudwatchlogs declares "logGroupName", sagemaker
+				// declares "ExecutionRoleArn". An exact-case lookup silently fails to
+				// rename on half the fleet, and the field then lands at its
+				// pre-rename path where nothing will ever look for it.
+				byMember[strings.ToLower(original)] = renamed
 			}
+			out.renames[strings.ToLower(opName)] = byMember
 		}
 	}
 	seen := map[string]bool{}
-	for _, fc := range rc.Fields {
+	for fieldName, fc := range rc.Fields {
+		if fc.CustomField != nil {
+			if shape := fc.CustomField.ListOf; shape != "" {
+				out.mounts[names.New(fieldName).CamelLower] = shape
+			} else if shape := fc.CustomField.MapOf; shape != "" {
+				out.mounts[names.New(fieldName).CamelLower] = shape
+			}
+		}
 		if fc.From == nil || fc.From.Operation == "" || seen[fc.From.Operation] {
 			continue
 		}

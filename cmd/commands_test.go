@@ -17,6 +17,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/scanner"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -73,6 +74,9 @@ type recorder struct {
 	attributionOpts   attributor.Options
 	attributionRegion string
 
+	candidatesCalled bool
+	candidatesOpts   scanner.CandidatesOptions
+
 	summary workspace.Summary
 	runErr  error
 }
@@ -99,6 +103,11 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 		statusRun: func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error) {
 			rec.statusCalled = true
 			rec.statusJSON = jsonOut
+			return rec.summary, rec.runErr
+		},
+		candidatesRun: func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error) {
+			rec.candidatesCalled = true
+			rec.candidatesOpts = opts
 			return rec.summary, rec.runErr
 		},
 		removeRun: func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error) {
@@ -474,7 +483,7 @@ func TestConfigGetMissingIdentityErrors(t *testing.T) {
 // Guard: the root command exposes the expected subcommands.
 func TestRootRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := map[string]bool{"init": false, "add": false, "refresh": false, "status": false, "remove": false, "release": false, "deploy": false, "build": false, "scan": false, "attribution": false, "config": false}
+	want := map[string]bool{"init": false, "add": false, "refresh": false, "status": false, "remove": false, "release": false, "deploy": false, "build": false, "scan": false, "candidates": false, "attribution": false, "config": false}
 	for _, c := range cmd.Commands() {
 		name := strings.Fields(c.Use)[0]
 		if _, ok := want[name]; ok {
@@ -809,5 +818,68 @@ func TestAttribution_EmptyIdentifierListSurfacesUsageError(t *testing.T) {
 	var ue *attributor.UsageError
 	if !errors.As(err, &ue) {
 		t.Fatalf("error = %v (%T), want *attributor.UsageError", err, err)
+	}
+}
+
+// --- candidates command ------------------------------------------------------
+
+// Defaults: with no argument and no flags the command indexes every resource of
+// every controller, so an audit can be started without naming anything.
+func TestCandidatesCommandDefaultsToAll(t *testing.T) {
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec), "candidates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rec.candidatesCalled {
+		t.Fatal("candidatesRun was not called")
+	}
+	if rec.candidatesOpts.Controller != scanner.All {
+		t.Errorf("Controller = %q, want %q", rec.candidatesOpts.Controller, scanner.All)
+	}
+	if rec.candidatesOpts.Resource != scanner.All {
+		t.Errorf("Resource = %q, want %q", rec.candidatesOpts.Resource, scanner.All)
+	}
+	if rec.candidatesOpts.OutDir != "" {
+		t.Errorf("OutDir = %q, want empty by default", rec.candidatesOpts.OutDir)
+	}
+}
+
+func TestCandidatesCommandPassesSelectors(t *testing.T) {
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"candidates", "eks", "--resource", "Nodegroup", "--out-dir", "/tmp/idx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rec.candidatesOpts
+	if got.Controller != "eks" || got.Resource != "Nodegroup" || got.OutDir != "/tmp/idx" {
+		t.Errorf("options = %+v, want {eks Nodegroup /tmp/idx}", got)
+	}
+}
+
+// The command declares no prerequisites: it reads local repositories and the
+// public API models, so it must run without git, a GitHub token, or AWS
+// credentials.
+func TestCandidatesCommandDeclaresNoPrerequisites(t *testing.T) {
+	rec := &recorder{}
+	chk := &fakeChecker{}
+	if _, _, err := runCmd(t, fakeDeps(chk, rec), "candidates", "eks"); err != nil {
+		t.Fatal(err)
+	}
+	if !chk.called {
+		t.Fatal("prerequisite check was not run")
+	}
+	if chk.gotNeed != (prereq.Need{}) {
+		t.Errorf("candidates declared prerequisites %+v, want none", chk.gotNeed)
+	}
+}
+
+// More than one positional argument is a usage error: the controller selector is
+// a single value (or "all").
+func TestCandidatesCommandRejectsExtraArgs(t *testing.T) {
+	rec := &recorder{}
+	if _, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec), "candidates", "eks", "s3"); err == nil {
+		t.Error("expected an error for two controller arguments")
 	}
 }

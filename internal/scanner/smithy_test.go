@@ -165,3 +165,253 @@ func sortedPaths(idx docIndex) []string {
 	}
 	return out
 }
+
+// customFieldModel exercises the two shapes a custom field can name: an
+// operation input published by the model under the "Request" suffix, and a plain
+// struct. generator.yaml uses the older SDK's "Input" spelling for the former.
+const customFieldModel = `{
+  "smithy": "2.0",
+  "shapes": {
+    "com.amazonaws.acm#CreateCertificateRequest": {
+      "type": "structure",
+      "members": {
+        "CertificateName": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>The certificate name.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#PutSubscriptionFilterRequest": {
+      "type": "structure",
+      "members": {
+        "RoleArn": {
+          "target": "com.amazonaws.acm#RoleArnType",
+          "traits": { "smithy.api#documentation": "<p>The ARN of an IAM role that grants permission.</p>" }
+        },
+        "FilterName": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>A name for the subscription filter.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#RoleArnType": {
+      "type": "string",
+      "traits": { "smithy.api#pattern": "^arn:aws:iam::[0-9]{12}:role/.+$" }
+    },
+    "com.amazonaws.acm#DomainName": { "type": "string" }
+  }
+}`
+
+// A custom field declares a shape, not an operation, and its members become a
+// nested subtree of the spec. Those subtrees carry no CRD description at all, so
+// if the walk does not mount them every field in them is judgeable by name alone.
+func TestBuildDocIndexMountsCustomFieldShape(t *testing.T) {
+	root := t.TempDir()
+	generator := `resources:
+  Certificate:
+    fields:
+      SubscriptionFilters:
+        custom_field:
+          list_of: PutSubscriptionFilterInput
+`
+	repo := writeControllerRepoWithGenerator(t, root, "acm-controller", generator)
+
+	idx, err := buildDocIndex(customFieldModel, repo, "Certificate")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doc, origin, ok := idx.lookupOrigin("subscriptionFilters.roleARN")
+	if !ok {
+		t.Fatalf("subscriptionFilters.roleARN not resolved; paths present: %v", sortedPaths(idx))
+	}
+	if origin != joinOriginPath {
+		t.Errorf("origin = %q, want %q", origin, joinOriginPath)
+	}
+	if !strings.Contains(doc.Description, "ARN of an IAM role") {
+		t.Errorf("description = %q", doc.Description)
+	}
+	// The target shape's pattern comes along, which is the strongest signal that a
+	// field is a reference.
+	if !strings.Contains(doc.Pattern, "arn:aws:iam::") {
+		t.Errorf("pattern = %q, want the IAM role ARN pattern", doc.Pattern)
+	}
+	if _, ok := idx.lookup("subscriptionFilters.filterName"); !ok {
+		t.Errorf("subscriptionFilters.filterName not resolved; paths present: %v", sortedPaths(idx))
+	}
+}
+
+// generator.yaml names the shape "<Operation>Input" (the older SDK convention)
+// while the models publish "<Operation>Request", so the lookup has to reconcile
+// the two. A plain struct name must still match directly.
+func TestFindShapeReconcilesInputAndRequestSuffixes(t *testing.T) {
+	m, err := newModelDocs(customFieldModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := m.model.findShape("PutSubscriptionFilterInput"); !ok ||
+		shortShapeName(got) != "PutSubscriptionFilterRequest" {
+		t.Errorf("findShape(Input form) = %q (found=%v), want PutSubscriptionFilterRequest", got, ok)
+	}
+	if got, ok := m.model.findShape("PutSubscriptionFilterRequest"); !ok ||
+		shortShapeName(got) != "PutSubscriptionFilterRequest" {
+		t.Errorf("findShape(exact) = %q (found=%v)", got, ok)
+	}
+	if got, ok := m.model.findShape("RoleArnType"); !ok || shortShapeName(got) != "RoleArnType" {
+		t.Errorf("findShape(plain struct name) = %q (found=%v)", got, ok)
+	}
+	if _, ok := m.model.findShape("NoSuchShape"); ok {
+		t.Error("findShape resolved a shape that does not exist")
+	}
+}
+
+// renamesPerOperationModel has two operations whose inputs rename *different*
+// members onto the same ACK field, which is what cloudwatchlogs does with
+// CreateLogGroup.LogGroupName and DescribeLogGroups.LogGroupNamePrefix.
+const renamesPerOperationModel = `{
+  "smithy": "2.0",
+  "shapes": {
+    "com.amazonaws.acm#CreateCertificateRequest": {
+      "type": "structure",
+      "members": {
+        "CertificateName": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>A name for the certificate.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#DescribeCertificatesRequest": {
+      "type": "structure",
+      "members": {
+        "CertificateNamePrefix": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>The prefix to match.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#DomainName": { "type": "string" }
+  }
+}`
+
+// A rename must stay scoped to the operation that declares it. Flattening them
+// applies one operation's rename while walking another's input shape, which
+// attributes the wrong member's documentation to the field — and because the
+// Create input is what defines the spec, it has to win the tie.
+func TestBuildDocIndexScopesRenamesPerOperation(t *testing.T) {
+	root := t.TempDir()
+	generator := `resources:
+  Certificate:
+    fields:
+      CreationTime:
+        from:
+          operation: DescribeCertificates
+    renames:
+      operations:
+        CreateCertificate:
+          input_fields:
+            CertificateName: Name
+        DescribeCertificates:
+          input_fields:
+            CertificateNamePrefix: Name
+`
+	repo := writeControllerRepoWithGenerator(t, root, "acm-controller", generator)
+
+	idx, err := buildDocIndex(renamesPerOperationModel, repo, "Certificate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ok := idx.lookup("name")
+	if !ok {
+		t.Fatalf("name not resolved; paths present: %v", sortedPaths(idx))
+	}
+	if !strings.Contains(doc.Description, "A name for the certificate") {
+		t.Errorf("name description = %q, want the Create input's documentation", doc.Description)
+	}
+	if strings.Contains(doc.Description, "prefix") {
+		t.Errorf("name took the Describe input's documentation: %q", doc.Description)
+	}
+}
+
+// Model member casing is inconsistent across services — cloudwatchlogs declares
+// "logGroupName" while sagemaker declares "ExecutionRoleArn" — so a rename keyed
+// on generator.yaml's PascalCase must match case-insensitively or the field lands
+// at its pre-rename path where nothing looks for it.
+func TestBuildDocIndexRenamesMatchMemberCaseInsensitively(t *testing.T) {
+	root := t.TempDir()
+	model := `{
+  "smithy": "2.0",
+  "shapes": {
+    "com.amazonaws.acm#CreateCertificateRequest": {
+      "type": "structure",
+      "members": {
+        "certificateName": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>A name for the certificate.</p>" }
+        }
+      }
+    },
+    "com.amazonaws.acm#DomainName": { "type": "string" }
+  }
+}`
+	generator := `resources:
+  Certificate:
+    renames:
+      operations:
+        CreateCertificate:
+          input_fields:
+            CertificateName: Name
+`
+	repo := writeControllerRepoWithGenerator(t, root, "acm-controller", generator)
+
+	idx, err := buildDocIndex(model, repo, "Certificate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc, ok := idx.lookup("name"); !ok || !strings.Contains(doc.Description, "A name for the certificate") {
+		t.Errorf("name = %+v (found=%v); paths present: %v", doc, ok, sortedPaths(idx))
+	}
+}
+
+// Several roots can contribute the same field path, and walkShape resolves that
+// by keeping whichever arrived first with documentation. Iterating the shape map
+// directly would make the winner depend on Go's map order, so two runs over an
+// unchanged repo could disagree — which defeats the point of a reproducible
+// index. Create must sort first because it is the operation that defines the spec.
+func TestRootShapesOrderIsDeterministicCreateFirst(t *testing.T) {
+	md, err := newModelDocs(renamesPerOperationModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first string
+	for i := 0; i < 20; i++ {
+		roots := md.model.rootShapes("Certificate", []string{"DescribeCertificates"})
+		if len(roots) != 2 {
+			t.Fatalf("got %d roots, want 2: %v", len(roots), roots)
+		}
+		if shortShapeName(roots[0]) != "CreateCertificateRequest" {
+			t.Fatalf("roots[0] = %q, want CreateCertificateRequest first", roots[0])
+		}
+		joined := strings.Join(roots, ",")
+		if i == 0 {
+			first = joined
+			continue
+		}
+		if joined != first {
+			t.Fatalf("root order varies between runs: %q vs %q", joined, first)
+		}
+	}
+}
+
+func TestOperationForShape(t *testing.T) {
+	cases := map[string]string{
+		"com.amazonaws.logs#CreateLogGroupRequest": "createloggroup",
+		"CreateLogGroupInput":                      "createloggroup",
+		"PutSubscriptionFilterMessage":             "putsubscriptionfilter",
+		"IpPermission":                             "ippermission",
+	}
+	for in, want := range cases {
+		if got := operationForShape(in); got != want {
+			t.Errorf("operationForShape(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
