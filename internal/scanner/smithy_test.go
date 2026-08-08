@@ -7,6 +7,29 @@ import (
 	"testing"
 )
 
+// buildDocIndex resolves the model documentation for one resource of one
+// controller in a single call: decode the model, then index it for the resource.
+//
+// The Indexer separates those two steps so a controller's model is decoded once
+// and indexed per resource, so this convenience exists only for tests, which
+// assert on one resource at a time.
+func buildDocIndex(modelJSON, repoPath, resource string) (docIndex, error) {
+	md, err := newModelDocs(modelJSON)
+	if err != nil {
+		return docIndex{}, err
+	}
+	return md.indexFor(repoPath, resource)
+}
+
+// lookup returns the model's documentation for a CRD field path, discarding the
+// join provenance. Production code reads the provenance (it is recorded on every
+// candidate record), so only these tests, which assert on the documentation
+// alone, have a use for the narrower form.
+func (d docIndex) lookup(path string) (smithyDoc, bool) {
+	doc, _, ok := d.lookupOrigin(path)
+	return doc, ok
+}
+
 // writeControllerRepoWithGenerator creates a controller checkout whose
 // generator.yaml is caller-supplied, for the cases (renames, custom field source
 // operations) that need configuration the shared fixture does not carry.

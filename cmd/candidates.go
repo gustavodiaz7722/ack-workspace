@@ -7,9 +7,13 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/scanner"
 )
 
-// flagOutDir names the directory that receives one candidate index file per
-// resource.
-const flagOutDir = "out-dir"
+const (
+	// flagResource selects which resource within a controller to index, or "all".
+	flagResource = "resource"
+	// flagOutDir names the directory that receives one candidate index file per
+	// resource.
+	flagOutDir = "out-dir"
+)
 
 // newCandidatesCommand builds the `candidates` subcommand, which emits the
 // deterministic cross-resource-reference candidate index for a resource: every
@@ -18,14 +22,13 @@ const flagOutDir = "out-dir"
 // validation patterns.
 //
 // This is the mechanical narrowing step of a reference audit, separated from the
-// judgment. `scan --issue 2` runs an agent that decides which candidates are
-// references; `candidates` just produces the field set it decides over, so an
-// audit can be split across independent reviewers who all start from identical
-// input, and so two runs over an unchanged repo produce the same set.
+// judgment about which candidates are genuine references: it produces the field
+// set a reviewer decides over, so an audit can be split across independent
+// reviewers who all start from identical input, and so two runs over an
+// unchanged repo produce the same set.
 //
 // It reads the CRDs and generator.yaml locally and fetches the service's Smithy
-// model over HTTP. Unlike scan it uses no Bedrock, so it needs no AWS
-// credentials, and it needs no git or GitHub identity either.
+// model over HTTP, so it needs no AWS credentials, git, or GitHub identity.
 func newCandidatesCommand(d deps, res *Result) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "candidates [controller|all]",

@@ -9,8 +9,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
+
+// testApp wires an App rooted at the given workspace directory.
+func testApp(root string) app.App {
+	return app.App{Config: config.Config{WorkspaceRoot: root, Concurrency: 4}}
+}
 
 // stubFetcher serves a fixed model (or a fixed error) so the Indexer can be
 // exercised without network access.

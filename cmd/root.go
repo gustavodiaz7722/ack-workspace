@@ -33,6 +33,11 @@ import (
 // directly onto a configuration key.
 const FlagDryRun = "dry-run"
 
+// flagRegion is the per-command flag naming the AWS region a subcommand operates
+// in. It lives here rather than on one command because deploy and attribution
+// both accept it, each documenting its own default and meaning.
+const flagRegion = "region"
+
 // Concurrency bounds. A resolved concurrency value outside this inclusive range
 // is rejected before any work is performed (Requirement 7.3).
 const (
@@ -132,11 +137,6 @@ type deps struct {
 	// the controller's code from local source via the code-generator's
 	// `make build-controller` target.
 	buildRun func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error)
-	// scanRun runs the scanner for the scan command. It constructs the Bedrock
-	// model client (from the given region and model), directs the scanner's
-	// findings at out, and (when debugOut is non-nil) its conversation transcript
-	// at debugOut.
-	scanRun func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error)
 	// candidatesRun runs the scanner's Indexer for the candidates command: it
 	// emits the deterministic cross-resource-reference candidate index. Records
 	// are written to out and progress/suppression notes to errOut, so stdout
@@ -185,17 +185,6 @@ func defaultDeps() deps {
 			return builder.New().Build(ctx, a, service, builder.Options{
 				SDKVersion: sdkVersion,
 			})
-		},
-		scanRun: func(ctx context.Context, a app.App, opts scanner.Options, region, model string, out, debugOut io.Writer) (workspace.Summary, error) {
-			client, err := scanner.NewBedrockClient(ctx, region, model)
-			if err != nil {
-				return workspace.Summary{}, err
-			}
-			s := scanner.NewWithWriterToken(client, out, a.Config.Token)
-			if debugOut != nil {
-				s.SetTraceWriter(debugOut)
-			}
-			return s.Scan(ctx, a, opts)
 		},
 		candidatesRun: func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error) {
 			return scanner.NewIndexer(a.Config.Token, out, errOut).Candidates(ctx, a, opts)
@@ -247,7 +236,6 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newReleaseCommand(d, res),
 		newDeployCommand(d, res),
 		newBuildCommand(d, res),
-		newScanCommand(d, res),
 		newCandidatesCommand(d, res),
 		newAttributionCommand(d, res),
 		newConfigCommand(),

@@ -3,8 +3,7 @@ package attributor
 // This file is the only place in the package that imports the AWS SDK. Keeping
 // the SDK behind the Backend interface is what lets the component's flow
 // (provisioning reporting, polling, artifact validation, atomic file writing) be
-// unit-tested with an in-memory fake and no credentials. It mirrors how the
-// scanner package isolates Amazon Bedrock in bedrock.go.
+// unit-tested with an in-memory fake and no credentials.
 
 import (
 	"context"

@@ -1,3 +1,18 @@
+// Package scanner implements the `candidates` feature: it emits the
+// deterministic cross-resource-reference candidate index for a resource — every
+// string-valued CRD spec field, fused with the generator.yaml markings that bear
+// on whether the field is a reference and with the service API model's
+// documentation and validation patterns.
+//
+// It is the mechanical narrowing step of a reference audit, deliberately
+// separated from the judgment about which candidates are genuine references.
+// Because the index is derived only from local repository contents and the
+// public API model, two runs over an unchanged repository produce the same set,
+// so an audit can be split across independent reviewers who all start from
+// identical input.
+//
+// The package reads CRDs and generator.yaml from disk and fetches Smithy models
+// over HTTP; it needs no AWS credentials.
 package scanner
 
 import (
@@ -15,6 +30,35 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
+
+// All is the sentinel accepted on both the controller and resource dimensions to
+// mean "every one", fanning the index out over everything under the workspace
+// root.
+const All = "all"
+
+// resolveControllers turns the controller selector into concrete controller
+// references: "all" discovers every controller under root; otherwise a single
+// named controller is resolved.
+func resolveControllers(root, selector string) ([]controllerRef, error) {
+	if selector == All {
+		return discoverControllers(root)
+	}
+	ref, err := findController(root, selector)
+	if err != nil {
+		return nil, err
+	}
+	return []controllerRef{ref}, nil
+}
+
+// resolveResources returns the resources to index for one controller: every
+// resource declared in its generator.yaml when the selector is "all", or the
+// single named resource otherwise.
+func resolveResources(c controllerRef, selector string) ([]string, error) {
+	if selector != All {
+		return []string{selector}, nil
+	}
+	return discoverResources(c.Path)
+}
 
 // CandidateRecord is one cross-resource-reference candidate field: a
 // string-valued spec field of a resource's CRD, fused with the generator.yaml
@@ -88,6 +132,12 @@ type CandidateRecord struct {
 	IsPrimaryKey bool `json:"is_primary_key"`
 }
 
+// Description provenance values recorded on a CandidateRecord.
+const (
+	descriptionSourceCRD   = "crd"
+	descriptionSourceModel = "model"
+)
+
 // ResourceIndex is the candidate index for one resource of one controller,
 // together with what the index cannot show.
 type ResourceIndex struct {
@@ -128,8 +178,8 @@ type CandidatesOptions struct {
 
 // Indexer builds cross-resource-reference candidate indexes for resources in a
 // workspace. It reads each controller's CRDs and generator.yaml locally and
-// fetches the service's Smithy API model over HTTP; unlike Scanner it needs no
-// Bedrock client and therefore no AWS credentials.
+// fetches the service's Smithy API model over HTTP, so it needs no AWS
+// credentials.
 type Indexer struct {
 	fetcher ModelFetcher
 	out     io.Writer

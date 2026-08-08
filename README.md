@@ -39,8 +39,10 @@ automates it.
   `aws-controllers-k8s`, so the build succeeds from any workspace root.
 - **`status`** — report the state of every managed repository (branch, dirty flag,
   ahead/behind vs. upstream) as a table or JSON.
-- **`scan`** — investigate known issues in managed controllers with an Amazon Bedrock,
-  tool-using agent, and report structured, per-field findings (a table or JSON).
+- **`candidates`** — emit the deterministic cross-resource-reference candidate index for a
+  resource: every string-valued CRD spec field, fused with the generator.yaml markings that
+  bear on whether it is a reference and with the API model's documentation and validation
+  patterns.
 - **`attribution`** — regenerate a controller's `ATTRIBUTION.md` by running the upstream
   `attribution-gen` tool on ephemeral AWS CodeBuild compute, then write the result into
   your local checkout. The work runs remotely because generating the document needs the
@@ -92,7 +94,7 @@ anything is missing:
 | `build`  |  yes  |      no⁵     |       no        |
 | `refresh`|  yes  |     yes²     |       yes       |
 | `status` |  yes  |      no      |       no        |
-| `scan`   |  no³  |      no      |       no        |
+| `candidates` | no³ |    no      |       no        |
 | `config` |  no   |      no      |       no        |
 
 ¹ `release` needs a token to open the upstream pull request and your identity to name the
@@ -100,9 +102,9 @@ fork branch; pass `--skip-pr` to push the release branch without opening a PR.
 
 ² `refresh` needs a token and identity to sync your fork from upstream via the GitHub API.
 
-³ `scan` instead needs **AWS credentials** for Amazon Bedrock (resolved from the default
-AWS credential chain) and a `grep` executable on your `PATH`. A `GITHUB_TOKEN`, if present,
-is used to raise the rate limit when listing Terraform provider docs, but is not required.
+³ `candidates` reads local repositories and needs network access to the public AWS API
+models; it uses no AWS credentials. A `GITHUB_TOKEN`, if present, only raises the rate limit
+on those fetches and is not required.
 
 ⁴ `deploy` needs `git` to tag the image with the controller's local HEAD, plus the
 `docker`, `aws`, `kubectl`, `helm`, and `eksctl` executables on your `PATH`. It uses **AWS
@@ -405,50 +407,6 @@ eksctl delete cluster --name ack-dev-auto --region us-west-2
 ack-workspace status
 ack-workspace status --json
 ```
-
-### Scan controllers for known issues
-
-`scan` runs an Amazon Bedrock, tool-using agent that investigates a known issue against a
-single resource of a single controller and reports structured findings. Each
-`(controller, resource, issue)` triple is one independent agent conversation; any of the
-three dimensions may be `all` to fan out (conversations run in parallel, bounded by
-`--concurrency`).
-
-```bash
-ack-workspace scan sns --resource Subscription --issue 1   # one triple
-ack-workspace scan sns --resource all --issue 1            # every SNS resource
-ack-workspace scan all                                     # every issue, resource, controller
-```
-
-The agent works from a small, sandboxed set of sources — a pre-filtered index of the
-resource's CRD spec fields fused with its `generator.yaml` markings, and the resource's
-Terraform provider docs — which it searches with `grep`. Each issue defines its own
-pass/fail rule and a reduced summary, so results read as `PASS`/`FAIL` with only the
-relevant field paths:
-
-```
-sns/Topic  issue 1 (json-document-fields)  FAIL
-    incorrectly marked: dataProtectionPolicy (is none, expected is_document)
-    correctly marked: deliveryPolicy, policy
-    terraform-only (no CRD field): archive_policy
-```
-
-Currently one issue is available:
-
-- **Issue 1 (`json-document-fields`)** — find CRD fields that hold a JSON/YAML or IAM
-  policy document but are not marked `is_document` / `is_iam_policy` in `generator.yaml`.
-
-Useful flags:
-
-```bash
-ack-workspace scan sns --resource Topic --issue 1 --json    # machine-readable findings
-ack-workspace scan sns --resource Topic --issue 1 --debug   # full agent transcript on stderr (runs serially)
-ack-workspace scan sns --issue 1 --model <bedrock-model-id> --region us-west-2
-```
-
-`--json` emits the full findings (including each finding's `terraform_field` and
-`ack_field_path`); `--debug` prints the complete conversation — every prompt, tool call,
-tool result, and the final report — to stderr, leaving stdout clean.
 
 ### Generate a controller's ATTRIBUTION.md
 

@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,23 +10,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// fieldRecord is one CRD spec field in the combined field index the model
-// greps. It fuses the CRD's structural information (path, type, description)
-// with the generator.yaml markings (is_document, is_iam_policy) so the model can
-// see, in one place, every candidate field and whether it is already marked.
+// fieldRecord is one CRD spec field as walked out of the resource's CRD: its
+// dotted path, OpenAPI type, and description. It is the structural half of a
+// candidate record, which the Indexer fuses with the generator.yaml markings and
+// the API model's documentation.
 type fieldRecord struct {
 	// Path is the field's dotted path within the resource spec, in the CRD's
 	// (camelCase) naming, for example "domainValidationOptions.validationDomain".
 	// Array element fields use the parent path without an index.
-	Path string `json:"path"`
+	Path string
 	// Type is the OpenAPI type of the field (string, object, array, boolean, …).
-	Type string `json:"type"`
+	Type string
 	// Description is the field's CRD description, if any.
-	Description string `json:"description,omitempty"`
-	// IsDocument reports whether generator.yaml marks the field is_document.
-	IsDocument bool `json:"is_document"`
-	// IsIAMPolicy reports whether generator.yaml marks the field is_iam_policy.
-	IsIAMPolicy bool `json:"is_iam_policy"`
+	Description string
 }
 
 // crdSchemaNode is the recursive subset of an OpenAPI v3 schema needed to walk a
@@ -72,15 +67,6 @@ func resourceSpecSchema(repoPath, resource string) (crdSchemaNode, error) {
 	return spec, nil
 }
 
-// specFieldRecords walks a resource's CRD spec into sorted field records with
-// the ACK-generated "<name>Ref" companion structures filtered out. It is the
-// shared body every field-index builder starts from before applying its own
-// per-field markings.
-func specFieldRecords(repoPath, resource string) ([]fieldRecord, error) {
-	_, records, err := walkedSpecFieldRecords(repoPath, resource)
-	return records, err
-}
-
 // walkedSpecFieldRecords resolves a resource's CRD spec schema and walks it into
 // sorted field records (with the ACK-generated "<name>Ref" companion structures
 // filtered out), returning the spec schema alongside the records. Callers that
@@ -97,58 +83,6 @@ func walkedSpecFieldRecords(repoPath, resource string) (crdSchemaNode, []fieldRe
 	records = filterReferenceFields(records)
 	sort.Slice(records, func(i, j int) bool { return records[i].Path < records[j].Path })
 	return spec, records, nil
-}
-
-// buildFieldIndex produces the combined field index for a resource as a JSON
-// document (a one-field-per-line array, so it greps cleanly). Every string-valued
-// spec field of the resource's CRD is included with its type, description, dotted
-// path, and the is_document / is_iam_policy markings resolved from generator.yaml.
-// Object/struct fields and non-string scalars are dropped: a JSON/IAM policy
-// document is always carried in a string (or a list of strings), so only
-// string-valued fields are candidates. Fields configured as cross-resource
-// references are dropped too: they hold an identifier, never a document. Finally,
-// fields marked is_primary_key or is_immutable are dropped: a document is never
-// the resource's own identifier and is never immutable, so these markings
-// reliably identify non-candidates.
-func buildFieldIndex(repoPath, resource string) (string, error) {
-	spec, records, err := walkedSpecFieldRecords(repoPath, resource)
-	if err != nil {
-		return "", err
-	}
-	records = filterNonStringFields(records, stringValuedPaths(spec))
-	m, err := loadFieldConfig(repoPath, resource)
-	if err != nil {
-		return "", err
-	}
-	records = filterConfiguredReferenceFields(records, m.ref)
-	records = filterKeyAndImmutableFields(records, m.immutable, m.primaryKey)
-	for i := range records {
-		norm := strings.ToLower(records[i].Path)
-		records[i].IsDocument = m.doc[norm]
-		records[i].IsIAMPolicy = m.iam[norm]
-	}
-	return marshalFieldIndex(records), nil
-}
-
-// filterKeyAndImmutableFields removes fields that generator.yaml marks
-// is_primary_key or is_immutable. The document issue uses it because a policy or
-// JSON document is never the resource's own identifier and is never immutable —
-// document fields are mutable, non-key data — so these markings reliably flag
-// non-candidates and dropping them trims the index. matching is case-insensitive
-// against the lowercased marking paths.
-func filterKeyAndImmutableFields(records []fieldRecord, immutable, primaryKey map[string]bool) []fieldRecord {
-	if len(immutable) == 0 && len(primaryKey) == 0 {
-		return records
-	}
-	out := records[:0]
-	for _, r := range records {
-		norm := strings.ToLower(r.Path)
-		if immutable[norm] || primaryKey[norm] {
-			continue
-		}
-		out = append(out, r)
-	}
-	return out
 }
 
 // walkFields appends a fieldRecord for every property beneath node (recursively)
@@ -304,41 +238,12 @@ func underReferencePrefix(path string, refPrefixes map[string]bool) bool {
 	return false
 }
 
-// filterConfiguredReferenceFields removes fields that generator.yaml configures
-// as cross-resource references. A reference field holds an ARN or identifier
-// that points at another resource, so it can never hold a JSON or IAM policy
-// document; the two sets are mutually exclusive. Dropping reference fields
-// shrinks the index the document issue must search without discarding any
-// candidate.
-//
-// This complements filterReferenceFields, which removes the generated
-// "<name>Ref" companion structures found in the CRD; this removes the reference
-// value field itself (for example the ARN string), which those structures shadow
-// but do not eliminate. refPaths holds the lowercased reference field paths from
-// generator.yaml, matched case-insensitively against the CRD paths (camelCase).
-func filterConfiguredReferenceFields(records []fieldRecord, refPaths map[string]bool) []fieldRecord {
-	if len(refPaths) == 0 {
-		return records
-	}
-	out := records[:0]
-	for _, r := range records {
-		norm := strings.ToLower(r.Path)
-		if refPaths[norm] || underReferencePrefix(norm, refPaths) {
-			continue
-		}
-		out = append(out, r)
-	}
-	return out
-}
-
-// genFieldConfig decodes only the per-field configuration the field index
-// needs: the document markings, whether the field is immutable or the resource's
-// primary key, and whether the field is a cross-resource reference. references is
-// captured as a raw node so its mere presence (a non-zero node) signals a
-// reference field, without decoding its internals.
+// genFieldConfig decodes only the per-field configuration the candidate index
+// needs: whether the field is immutable or the resource's primary key, and
+// whether it is already a cross-resource reference. references is captured as a
+// raw node so its mere presence (a non-zero node) signals a reference field,
+// without decoding its internals.
 type genFieldConfig struct {
-	IsDocument   bool      `yaml:"is_document"`
-	IsIAMPolicy  bool      `yaml:"is_iam_policy"`
 	IsImmutable  bool      `yaml:"is_immutable"`
 	IsPrimaryKey bool      `yaml:"is_primary_key"`
 	References   yaml.Node `yaml:"references"`
@@ -355,17 +260,15 @@ type genMarkings struct {
 // builders consult. Each is a set of lowercased field paths, so they correlate
 // case-insensitively with the CRD's camelCase paths.
 type fieldMarkings struct {
-	doc        map[string]bool // is_document
-	iam        map[string]bool // is_iam_policy
 	ref        map[string]bool // has a references block
 	immutable  map[string]bool // is_immutable
 	primaryKey map[string]bool // is_primary_key
 }
 
 // loadFieldConfig returns the per-field generator.yaml markings for the resource:
-// which fields are marked is_document / is_iam_policy, which carry a references
-// block, and which are marked is_immutable / is_primary_key. All paths are
-// lowercased for case-insensitive correlation with the CRD's camelCase paths.
+// which fields carry a references block, and which are marked is_immutable /
+// is_primary_key. All paths are lowercased for case-insensitive correlation with
+// the CRD's camelCase paths.
 func loadFieldConfig(repoPath, resource string) (fieldMarkings, error) {
 	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))
 	if err != nil {
@@ -376,20 +279,12 @@ func loadFieldConfig(repoPath, resource string) (fieldMarkings, error) {
 		return fieldMarkings{}, fmt.Errorf("parsing generator.yaml: %w", err)
 	}
 	m := fieldMarkings{
-		doc:        map[string]bool{},
-		iam:        map[string]bool{},
 		ref:        map[string]bool{},
 		immutable:  map[string]bool{},
 		primaryKey: map[string]bool{},
 	}
 	for path, fc := range g.Resources[resource].Fields {
 		norm := strings.ToLower(path)
-		if fc.IsDocument {
-			m.doc[norm] = true
-		}
-		if fc.IsIAMPolicy {
-			m.iam[norm] = true
-		}
 		// A non-zero node means a `references:` block is present on the field.
 		if !fc.References.IsZero() {
 			m.ref[norm] = true
@@ -402,164 +297,4 @@ func loadFieldConfig(repoPath, resource string) (fieldMarkings, error) {
 		}
 	}
 	return m, nil
-}
-
-// marshalFieldIndex renders the records as a JSON array with one field object
-// per line, so grep returns whole field records rather than fragments.
-func marshalFieldIndex(records []fieldRecord) string {
-	return marshalRecordsPerLine(records)
-}
-
-// marshalRecordsPerLine renders a slice of records as a JSON array with one
-// record object per line, so grep returns whole records rather than fragments.
-func marshalRecordsPerLine[T any](records []T) string {
-	if len(records) == 0 {
-		return "[]\n"
-	}
-	var b strings.Builder
-	b.WriteString("[\n")
-	for i, r := range records {
-		line, _ := json.Marshal(r)
-		b.Write(line)
-		if i < len(records)-1 {
-			b.WriteByte(',')
-		}
-		b.WriteByte('\n')
-	}
-	b.WriteString("]\n")
-	return b.String()
-}
-
-// referenceFieldRecord is one CRD spec field in the field index the reference
-// issue greps. Unlike the document issue's index it does not carry document
-// markings; instead it records whether generator.yaml already configures the
-// field as a cross-resource reference, so the model can tell a field that is
-// correctly wired from one that is a candidate missing its reference.
-type referenceFieldRecord struct {
-	// Path is the field's dotted path within the resource spec, in the CRD's
-	// (camelCase) naming, for example "lambdaConfig.preSignUp".
-	Path string `json:"path"`
-	// Type is the OpenAPI type of the field (string, object, array, …).
-	Type string `json:"type"`
-	// Description is the field's description. ACK only propagates descriptions
-	// into the CRD for top-level spec fields, so for a nested field this is
-	// filled from the service's Smithy model instead (see smithy.go).
-	Description string `json:"description,omitempty"`
-	// DescriptionSource records where Description came from, "crd" or "model", so
-	// the agent can weigh it (and so a missing description is distinguishable
-	// from an empty one). It is empty when no description was found in either.
-	DescriptionSource string `json:"description_source,omitempty"`
-	// Pattern is the validation pattern the API model constrains the field with,
-	// when it has one. For an identifier field this is frequently an ARN template
-	// that names the referenced service and resource type outright, which is the
-	// strongest available signal that the field is a cross-resource reference.
-	Pattern string `json:"pattern,omitempty"`
-	// IsReference reports whether generator.yaml already configures the field
-	// with a references block.
-	IsReference bool `json:"is_reference"`
-	// IsImmutable reports whether generator.yaml marks the field is_immutable.
-	// A reference is frequently immutable (a KMS key, IAM role, parent ID, or
-	// subnet is set once and cannot change), so this is a supporting signal for a
-	// reference, not a reason to exclude the field.
-	IsImmutable bool `json:"is_immutable"`
-	// IsPrimaryKey reports whether generator.yaml marks the field is_primary_key.
-	// The resource's own primary key is not a cross-resource reference, but a
-	// sub-resource's primary key can itself be a reference to its parent, so the
-	// model must weigh this together with the field's meaning.
-	IsPrimaryKey bool `json:"is_primary_key"`
-}
-
-// buildReferenceFieldIndex produces the field index the reference issue greps: a
-// one-field-per-line JSON array of every spec field of the resource's CRD, each
-// marked with whether generator.yaml already configures it as a cross-resource
-// reference.
-//
-// Unlike the document issue's index (buildFieldIndex), reference-configured
-// fields are kept — the point of this issue is to check whether reference fields
-// are configured, so they must be present and flagged. The generated "<name>Ref"
-// companion structures are still dropped (via filterReferenceFields) because
-// they are ACK plumbing, not API fields.
-//
-// Only string-valued fields are kept: a cross-resource reference holds an
-// ARN/ID/Name, always carried in a string (or a list of strings), so object and
-// non-string scalar fields are never reference candidates and are dropped.
-//
-// Unlike the document index, immutable and primary-key fields are NOT dropped: a
-// reference is frequently immutable (a KMS key, IAM role, parent ID, or subnet
-// is set once) and can even be a sub-resource's primary key, so those markings
-// are surfaced on each record as signal rather than used to exclude candidates.
-//
-// docs supplies the service's Smithy model documentation, joined onto any field
-// whose CRD description is empty — which is the overwhelming majority of nested
-// fields, since ACK only propagates descriptions to top-level spec fields. A zero
-// docs (the model could not be fetched or parsed) is valid and simply leaves those
-// descriptions empty, so a model outage degrades the index rather than failing it.
-func buildReferenceFieldIndex(repoPath, resource string, docs docIndex) (string, error) {
-	spec, records, err := walkedSpecFieldRecords(repoPath, resource)
-	if err != nil {
-		return "", err
-	}
-	records = filterNonStringFields(records, stringValuedPaths(spec))
-	m, err := loadFieldConfig(repoPath, resource)
-	if err != nil {
-		return "", err
-	}
-	refRecords := make([]referenceFieldRecord, len(records))
-	for i, r := range records {
-		norm := strings.ToLower(r.Path)
-		rec := referenceFieldRecord{
-			Path:         r.Path,
-			Type:         r.Type,
-			Description:  r.Description,
-			IsReference:  m.ref[norm] || underReferencePrefix(norm, m.ref),
-			IsImmutable:  m.immutable[norm],
-			IsPrimaryKey: m.primaryKey[norm],
-		}
-		if rec.Description != "" {
-			rec.DescriptionSource = descriptionSourceCRD
-		}
-		if doc, ok := docs.lookup(r.Path); ok {
-			rec.Pattern = doc.Pattern
-			if rec.Description == "" && doc.Description != "" {
-				rec.Description = doc.Description
-				rec.DescriptionSource = descriptionSourceModel
-			}
-		}
-		refRecords[i] = rec
-	}
-	return marshalRecordsPerLine(refRecords), nil
-}
-
-// Description provenance values recorded on a referenceFieldRecord.
-const (
-	descriptionSourceCRD   = "crd"
-	descriptionSourceModel = "model"
-)
-
-// fieldTypeRecord is one CRD spec field in the structural field index the
-// sub-resource issue greps: just the path, type, and description, with no
-// generator.yaml markings. It is deliberately minimal — the issue reasons about
-// the shape of the field tree (which fields are nested objects or arrays of
-// objects, and whether they carry id/arn/tags sub-fields), not about markings.
-type fieldTypeRecord struct {
-	Path        string `json:"path"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-}
-
-// buildFieldTypeIndex produces the structural field index for a resource: a
-// one-field-per-line JSON array of every spec field with its dotted path, type,
-// and description. Unlike the document and reference indexes it carries no
-// markings and keeps every field (only the generated "<name>Ref" companions are
-// dropped), so the sub-resource issue can see the full nested shape of the CRD.
-func buildFieldTypeIndex(repoPath, resource string) (string, error) {
-	records, err := specFieldRecords(repoPath, resource)
-	if err != nil {
-		return "", err
-	}
-	typeRecords := make([]fieldTypeRecord, len(records))
-	for i, r := range records {
-		typeRecords[i] = fieldTypeRecord{Path: r.Path, Type: r.Type, Description: r.Description}
-	}
-	return marshalRecordsPerLine(typeRecords), nil
 }

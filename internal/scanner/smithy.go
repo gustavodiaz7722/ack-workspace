@@ -88,26 +88,6 @@ type docIndex struct {
 	lowerPath map[string]string
 }
 
-// lookup returns the model's documentation for a CRD field path. It prefers the
-// structural match, falls back to a case-insensitive structural match, and only
-// then to the unambiguous member-name index.
-func (d docIndex) lookup(path string) (smithyDoc, bool) {
-	if doc, ok := d.byPath[path]; ok {
-		return doc, true
-	}
-	if canonical, ok := d.lowerPath[strings.ToLower(path)]; ok {
-		if doc, ok := d.byPath[canonical]; ok {
-			return doc, true
-		}
-	}
-	leaf := path
-	if i := strings.LastIndex(leaf, "."); i >= 0 {
-		leaf = leaf[i+1:]
-	}
-	doc, ok := d.byMember[leaf]
-	return doc, ok
-}
-
 // Documentation join provenance reported by lookupOrigin.
 const (
 	// joinOriginPath means the documentation was reached by structurally walking
@@ -122,9 +102,11 @@ const (
 	joinOriginMember = "member"
 )
 
-// lookupOrigin is lookup with the join provenance reported alongside the
-// documentation, so a consumer can tell a structurally resolved description
-// (right by construction) from one recovered via the member-name fallback.
+// lookupOrigin returns the model's documentation for a CRD field path together
+// with the join provenance, so a consumer can tell a structurally resolved
+// description (right by construction) from one recovered via the member-name
+// fallback. It prefers the structural match, falls back to a case-insensitive
+// structural match, and only then to the unambiguous member-name index.
 func (d docIndex) lookupOrigin(path string) (smithyDoc, string, bool) {
 	if doc, ok := d.byPath[path]; ok {
 		return doc, joinOriginPath, true
@@ -142,18 +124,6 @@ func (d docIndex) lookupOrigin(path string) (smithyDoc, string, bool) {
 		return doc, joinOriginMember, true
 	}
 	return smithyDoc{}, "", false
-}
-
-// buildDocIndex resolves the model documentation for one resource of one
-// controller: it decodes the model, determines which operation input shapes feed
-// the resource's spec, walks them into CRD-shaped field paths, and builds the
-// unambiguous member-name fallback.
-func buildDocIndex(modelJSON, repoPath, resource string) (docIndex, error) {
-	md, err := newModelDocs(modelJSON)
-	if err != nil {
-		return docIndex{}, err
-	}
-	return md.indexFor(repoPath, resource)
 }
 
 // modelDocs is a decoded Smithy model together with its member-name fallback
