@@ -72,9 +72,10 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			"as-is; deploy repoints the kubeconfig at " + deployer.ClusterName + " on every run, so a " +
 			"deploy cannot land on a cluster you did not intend. When the cluster does not exist yet, " +
 			"deploy creates it: an EKS Auto Mode cluster with an EKS Pod Identity association that " +
-			"gives controllers in the target namespace AWS credentials. That first run is a one-time " +
-			"bootstrap which takes 15-25 minutes and creates billable AWS resources (an EKS cluster, " +
-			"its VPC, and an IAM role); later deploys reuse it and only fill in what is missing. " +
+			"gives controllers in the target namespace AWS credentials. The cluster is meant to be " +
+			"long-lived: that first run takes 15-25 minutes and creates billable AWS resources (an " +
+			"EKS cluster, its VPC, and an IAM role), and every run after it reuses the cluster and " +
+			"only fills in what is missing, so keep it in an account you are happy to leave running. " +
 			"deploy checks for docker, aws, kubectl, helm and eksctl before it starts, so a " +
 			"missing one is reported up front rather than partway through. The association attaches " +
 			"AdministratorAccess by default, which suits a throwaway development account and nothing " +

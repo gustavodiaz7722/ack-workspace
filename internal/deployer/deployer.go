@@ -360,12 +360,13 @@ func describeCluster(existed bool) string {
 // the controller's service account exists and is bound to AWS credentials
 // through an EKS Pod Identity association.
 //
-// Every step is idempotent, so this runs on every deploy and only does the work
-// the cluster is missing. The kubeconfig is repointed unconditionally: that is
+// Every step is idempotent because the cluster is long-lived: this runs on every
+// deploy against a cluster that usually already exists, and does only the work
+// that is actually missing. The kubeconfig is repointed unconditionally, which is
 // what makes a deploy target this cluster regardless of which context was
 // selected beforehand. Creating the cluster carries the association for the
-// default service account, but the association is still checked afterwards,
-// since a caller who names a different service account needs one for it too.
+// default service account, but the association is still checked afterwards, since
+// a caller who names a different service account needs one for it too.
 func (d *Deployer) provision(
 	ctx context.Context,
 	region, namespace, serviceAccount string,

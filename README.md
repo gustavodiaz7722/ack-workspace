@@ -25,10 +25,10 @@ automates it.
   from upstream, create a `release-<version>` branch, regenerate the release artifacts,
   commit and push them to your fork, and open a pull request against upstream.
 - **`deploy`** — build a single service controller from your local checkout and deploy it to
-  the shared ACK development cluster (`ack-dev-auto`), **creating that cluster if it does not
-  exist**. The cluster is fixed and your kubeconfig is repointed at it every run, so a deploy
-  cannot land somewhere unintended. Requires `docker`, `aws`, `kubectl`, `helm`, and `eksctl`
-  on your `PATH`.
+  the long-lived ACK development cluster (`ack-dev-auto`), **creating that cluster on the first
+  run** and reusing it thereafter. The cluster is fixed and your kubeconfig is repointed at it
+  every run, so a deploy cannot land somewhere unintended. Requires `docker`, `aws`, `kubectl`,
+  `helm`, and `eksctl` on your `PATH`.
 - **`build`** — regenerate a single service controller's code from its local checked-out
   branch by running the code-generator's `make build-controller` target. Wires up the
   environment overrides (`RUNTIME_CRD_DIR`, `ACK_GENERATE_BIN_PATH`, `TEMPLATES_DIR`) that
@@ -370,8 +370,9 @@ ack-workspace deploy ecr --service-account ack-ecr-controller  # bind credential
 Every deploy targets one cluster, `ack-dev-auto`, in the region resolved from your AWS
 configuration. It is not selectable, and your current kubeconfig context is never used as-is:
 `deploy` repoints the kubeconfig at `ack-dev-auto` on every run, so a deploy cannot land on a
-cluster you did not intend. If the cluster does not exist, `deploy` creates it first — that
-makes the first run a one-time bootstrap with nothing else to prepare.
+cluster you did not intend. If the cluster does not exist, `deploy` creates it first, so the
+first run doubles as a one-time bootstrap with nothing else to prepare — and every run after
+that reuses it.
 
 When the cluster is absent, `deploy` runs `eksctl create cluster` with a generated
 configuration and then installs the controller:
@@ -392,8 +393,12 @@ configuration and then installs the controller:
   cluster. Name a different account with `--service-account` and an association is created for
   that one instead.
 
-Every step is idempotent, so a later deploy only fills in what is missing — including adding
-an association for a service account that does not have one yet.
+**The cluster is meant to be long-lived.** Create it once and keep it: every provisioning step
+is idempotent, so each later deploy only fills in what is missing — including adding an
+association for a service account that does not have one yet — and skips the 15–25 minute
+creation entirely. A deploy onto the existing cluster is just build, push, and install, a few
+minutes end to end. Multiple controllers coexist on it happily; they share one namespace, one
+service account, and one association.
 
 ```bash
 ack-workspace deploy ecr --dry-run              # preview, including any cluster creation
@@ -402,16 +407,18 @@ ack-workspace deploy ecr --cluster-policy-arn arn:aws:iam::aws:policy/AmazonEC2C
 ```
 
 `--cluster-version` and `--cluster-policy-arn` only apply when the cluster (or its IAM role)
-has to be created; they are ignored once it exists.
+has to be created, so they are ignored once it exists. Changing either afterwards means
+editing the resource directly, or deleting it and letting the next deploy recreate it.
 
-> **Caution:** creating the cluster takes 15–25 minutes and creates billable AWS resources
-> (an EKS cluster, its VPC, and an IAM role). The pod identity role gets
-> `AdministratorAccess` by default so that any ACK controller works in a throwaway
-> development account — that is appropriate there and nowhere else. Scope it down with
+> **Caution:** the first deploy takes 15–25 minutes and creates billable AWS resources (an EKS
+> cluster, its VPC, and an IAM role). A long-lived cluster keeps costing while it runs, so keep
+> it in a development account you are happy to leave running. The pod identity role gets
+> `AdministratorAccess` by default so that any ACK controller works without further setup —
+> appropriate for a throwaway development account and nowhere else. Scope it down with
 > `--cluster-policy-arn` in any account you share with others.
 
-Tear the cluster down when you are finished. Delete your custom resources first so the
-controllers clean up the AWS resources they created; those are not removed with the cluster.
+To delete it, remove your custom resources first so the controllers clean up the AWS resources
+they created; those are not removed with the cluster.
 
 ```bash
 eksctl delete cluster --name ack-dev-auto --region us-west-2
