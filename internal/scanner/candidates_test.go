@@ -202,7 +202,7 @@ resources:
 `
 	repo := writeControllerRepoWithGenerator(t, root, "acm-controller", generator)
 
-	got, err := suppressedIdentifierFields(repo)
+	got, err := suppressedIdentifierFields(repo, modelDocs{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,6 +528,115 @@ func TestCandidatesSummaryCarriesOnlyFailures(t *testing.T) {
 	for _, r := range summary.Results {
 		if r.Outcome != workspace.OutcomeFailed {
 			t.Errorf("Summary carries a non-failure Result: %+v", r)
+		}
+	}
+}
+
+// suppressedStructModel mirrors sfn: an operation input carrying a struct member
+// whose own leaf is a reference. Suppressing the struct hides the leaf, and the
+// struct's name says nothing about what it contains.
+const suppressedStructModel = `{
+  "smithy": "2.0",
+  "shapes": {
+    "com.amazonaws.acm#CreateCertificateRequest": {
+      "type": "structure",
+      "members": {
+        "EncryptionConfiguration": { "target": "com.amazonaws.acm#EncryptionConfig" },
+        "ClientToken": { "target": "com.amazonaws.acm#DomainName" }
+      }
+    },
+    "com.amazonaws.acm#EncryptionConfig": {
+      "type": "structure",
+      "members": {
+        "KmsKeyId": {
+          "target": "com.amazonaws.acm#DomainName",
+          "traits": { "smithy.api#documentation": "<p>A key ARN.</p>" }
+        },
+        "Type": { "target": "com.amazonaws.acm#DomainName" }
+      }
+    },
+    "com.amazonaws.acm#DomainName": { "type": "string" }
+  }
+}`
+
+// A suppressed struct hides every field inside it. Reporting only paths whose own
+// final segment looks like an identifier misses those entirely — sfn removes
+// CreateStateMachineInput.EncryptionConfiguration, and the kms Key reference is
+// the KmsKeyId leaf inside it.
+func TestSuppressedIdentifierFieldsFindsIdentifiersInsideSuppressedStructs(t *testing.T) {
+	root := t.TempDir()
+	generator := `ignore:
+  field_paths:
+    - CreateCertificateInput.EncryptionConfiguration
+    - CreateCertificateInput.ClientToken
+resources:
+  Certificate:
+    fields: {}
+`
+	repo := writeControllerRepoWithGenerator(t, root, "acm-controller", generator)
+
+	docs, err := newModelDocs(suppressedStructModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := suppressedIdentifierFields(repo, docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("suppressedIdentifierFields = %v, want exactly the struct entry", got)
+	}
+	if !strings.Contains(got[0], "EncryptionConfiguration") || !strings.Contains(got[0], "KmsKeyId") {
+		t.Errorf("entry = %q, want it to name the struct and the hidden KmsKeyId member", got[0])
+	}
+	// ClientToken is a suppressed string whose members are nothing; it must not be
+	// reported, or every suppression becomes noise.
+	for _, e := range got {
+		if strings.Contains(e, "ClientToken") {
+			t.Errorf("idempotency token reported as hiding an identifier: %q", e)
+		}
+	}
+}
+
+// Without a model the struct half cannot run, and that must degrade rather than
+// error: the name-based half still works.
+func TestSuppressedIdentifierFieldsWithoutModel(t *testing.T) {
+	root := t.TempDir()
+	generator := `ignore:
+  field_paths:
+    - CreateCertificateInput.EncryptionConfiguration
+    - CreateCertificateInput.KmsKeyId
+resources:
+  Certificate:
+    fields: {}
+`
+	repo := writeControllerRepoWithGenerator(t, root, "acm-controller", generator)
+
+	got, err := suppressedIdentifierFields(repo, modelDocs{})
+	if err != nil {
+		t.Fatalf("no model must degrade, not fail: %v", err)
+	}
+	if len(got) != 1 || got[0] != "CreateCertificateInput.KmsKeyId" {
+		t.Errorf("suppressedIdentifierFields = %v, want only the name-matched entry", got)
+	}
+}
+
+func TestSuppressedHiddenIdentifiersUnresolvable(t *testing.T) {
+	docs, err := newModelDocs(suppressedStructModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A path naming a shape or member the model does not have must yield nothing
+	// rather than guessing.
+	for _, path := range []string{
+		"NoSuchInput.EncryptionConfiguration",
+		"CreateCertificateInput.NoSuchMember",
+		"CreateCertificateInput.ClientToken", // a string has no members
+		"Bare",                               // no member segment at all
+	} {
+		if got := suppressedHiddenIdentifiers(docs.model, path); len(got) != 0 {
+			t.Errorf("suppressedHiddenIdentifiers(%q) = %v, want empty", path, got)
 		}
 	}
 }

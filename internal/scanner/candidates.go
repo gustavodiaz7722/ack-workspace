@@ -241,7 +241,7 @@ func (ix *Indexer) indexController(
 		modelAvailable = true
 	}
 
-	suppressed, err := suppressedIdentifierFields(c.Path)
+	suppressed, err := suppressedIdentifierFields(c.Path, docs)
 	if err != nil {
 		ix.notef("note: %s: could not read ignore.field_paths (%v); suppressed references cannot be reported", c.Alias, err)
 	}
@@ -504,6 +504,59 @@ type generatorIgnore struct {
 // cross-resource reference that no index can see.
 var identifierSuffixes = []string{"arn", "arns", "id", "ids", "identifier", "name", "names"}
 
+// suppressedHiddenIdentifiers resolves a suppressed field path to its shape and
+// reports the identifier-looking members underneath it.
+//
+// This catches the case a name test alone cannot: suppressing a *struct* hides
+// every field inside it, and the struct's own name says nothing about what it
+// contains. sfn removes CreateStateMachineInput.EncryptionConfiguration, whose
+// KmsKeyId member is a kms Key reference — invisible both to the index and to a
+// check that only looks at "EncryptionConfiguration".
+//
+// Only the members directly beneath the suppressed shape are examined. A deeper
+// walk would report identifiers the suppression is merely an ancestor of, which
+// buries the ones that matter.
+func suppressedHiddenIdentifiers(m smithyModel, path string) []string {
+	segments := strings.Split(path, ".")
+	if len(segments) < 2 {
+		return nil
+	}
+	shapeName, ok := m.findShape(segments[0])
+	if !ok {
+		return nil
+	}
+	// Walk the named members to reach the suppressed one.
+	for _, segment := range segments[1:] {
+		resolved, shape, ok := m.resolveStruct(shapeName)
+		if !ok {
+			return nil
+		}
+		shapeName = ""
+		for memberName, member := range shape.Members {
+			if strings.EqualFold(memberName, segment) {
+				shapeName = member.Target
+				break
+			}
+		}
+		if shapeName == "" {
+			_ = resolved
+			return nil
+		}
+	}
+	_, shape, ok := m.resolveStruct(shapeName)
+	if !ok {
+		return nil
+	}
+	var hidden []string
+	for memberName := range shape.Members {
+		if looksLikeIdentifier(memberName) {
+			hidden = append(hidden, memberName)
+		}
+	}
+	sort.Strings(hidden)
+	return hidden
+}
+
 // suppressedIdentifierFields returns the ignore.field_paths entries whose final
 // segment looks like a resource identifier, sorted.
 //
@@ -515,7 +568,7 @@ var identifierSuffixes = []string{"arn", "arns", "id", "ids", "identifier", "nam
 // clean resource. Note that a suppressed field is not fixable with a references
 // block at all: un-ignoring it is a separate, larger change, because a reference
 // cannot target a field absent from the CRD.
-func suppressedIdentifierFields(repoPath string) ([]string, error) {
+func suppressedIdentifierFields(repoPath string, docs modelDocs) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))
 	if err != nil {
 		return nil, fmt.Errorf("reading generator.yaml: %w", err)
@@ -528,6 +581,16 @@ func suppressedIdentifierFields(repoPath string) ([]string, error) {
 	for _, p := range g.Ignore.FieldPaths {
 		if looksLikeIdentifier(p) {
 			out = append(out, p)
+			continue
+		}
+		// The path itself does not look like an identifier, but it may name a
+		// struct whose members do. Requires the model, so this half is skipped
+		// when it could not be fetched.
+		if len(docs.model.Shapes) == 0 {
+			continue
+		}
+		if hidden := suppressedHiddenIdentifiers(docs.model, p); len(hidden) > 0 {
+			out = append(out, fmt.Sprintf("%s (hides %s)", p, strings.Join(hidden, ", ")))
 		}
 	}
 	sort.Strings(out)
