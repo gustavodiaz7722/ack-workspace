@@ -178,6 +178,13 @@ func TestCandidateRecordsWithoutModel(t *testing.T) {
 	if name, _ := recordByPath(records, "name"); name.DescriptionSource != descriptionSourceCRD {
 		t.Errorf("name description_source = %q, want crd", name.DescriptionSource)
 	}
+	// A healthy index stays quiet: candidateRecords itself does not know whether
+	// the model was reachable, so the flag is set by the caller.
+	for _, r := range records {
+		if r.ModelUnavailable {
+			t.Errorf("%s: model_unavailable set by candidateRecords", r.Path)
+		}
+	}
 }
 
 func TestSuppressedIdentifierFields(t *testing.T) {
@@ -352,8 +359,17 @@ func TestCandidatesDegradesWhenModelUnavailable(t *testing.T) {
 	if summary.HasFailures() {
 		t.Errorf("unavailable model reported as a failure: %+v", summary.Results)
 	}
-	if len(decodeLines(t, out.String())) == 0 {
+	records := decodeLines(t, out.String())
+	if len(records) == 0 {
 		t.Error("no records emitted without a model")
+	}
+	// The degradation must be visible to a consumer that reads only the index and
+	// never sees the stderr warning, because "no pattern" is otherwise
+	// indistinguishable from a field that genuinely has none.
+	for _, r := range records {
+		if !r.ModelUnavailable {
+			t.Errorf("%s: model_unavailable = false on a degraded index", r.Path)
+		}
 	}
 	// The degradation must be stated, so an empty gap list is not mistaken for a
 	// thorough one.

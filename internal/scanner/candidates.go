@@ -43,6 +43,15 @@ type CandidateRecord struct {
 	// DescriptionSource is "crd" or "model", so a reader can weigh the
 	// description and tell a missing one from an empty one.
 	DescriptionSource string `json:"description_source,omitempty"`
+	// ModelUnavailable marks a record built while the service's API model could
+	// not be fetched, so it carries no model description and no pattern and is
+	// judgeable by field name alone.
+	//
+	// It is present only on a degraded record, so a healthy index stays quiet. The
+	// asymmetry is deliberate: a consumer reading the index alone would otherwise
+	// have to infer degradation from the *absence* of patterns, which is
+	// indistinguishable from a resource whose fields genuinely have none.
+	ModelUnavailable bool `json:"model_unavailable,omitempty"`
 	// ModelJoin records how a model-sourced description and pattern were matched
 	// to this field: "path" when the model's shape graph was walked to this exact
 	// field path, "member" when the structural walk did not reach the field and
@@ -296,6 +305,13 @@ func (ix *Indexer) buildResourceIndex(
 	records, err := candidateRecords(c.Path, resource, index)
 	if err != nil {
 		return ResourceIndex{}, err
+	}
+	if !modelAvailable {
+		// Mark every record, so the degradation is visible to a consumer that reads
+		// only the index file and never sees the stderr warning.
+		for i := range records {
+			records[i].ModelUnavailable = true
+		}
 	}
 	return ResourceIndex{
 		Controller:     c.Alias,
