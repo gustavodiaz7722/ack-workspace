@@ -19,11 +19,15 @@ const configFileName = "config"
 
 // Config holds the effective configuration values for a command invocation.
 type Config struct {
-	GitHubUser    string // GitHub identity
+	GitHubUser    string // GitHub identity, empty when none was supplied
 	WorkspaceRoot string // absolute path
 	RepoPrefix    string // default "ack-"
 	Concurrency   int    // default 4, range 1..32
 	Token         string // resolved, never persisted
+	// Path is the configuration file this was resolved against, whether or not the
+	// file exists. It is carried so a component reporting a missing value can name
+	// the file to persist it in.
+	Path string
 }
 
 // Source carries the raw, command-scoped inputs used during resolution.

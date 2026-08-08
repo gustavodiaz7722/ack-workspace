@@ -58,33 +58,19 @@ func (e *ParseError) Error() string {
 
 func (e *ParseError) Unwrap() error { return e.Err }
 
-// MissingGitHubUserError indicates the configuration file does not exist and no
-// GitHub identity was supplied through a flag or environment variable. The
-// GitHub identity is the only required value that has no default.
-type MissingGitHubUserError struct {
-	// Path is the configuration file path the user should create.
-	Path string
-}
-
-func (e *MissingGitHubUserError) Error() string {
-	return fmt.Sprintf(
-		"missing required GitHub identity: supply it with the --%s flag, set the %s environment variable, or create the configuration file at %q",
-		FlagGitHubUser, EnvGitHubUser, e.Path,
-	)
-}
-
 // Resolve applies per-value precedence, highest first: command-line flag value,
 // then environment variable value (where one is defined for that value), then
 // the persisted file value, then the default value. The selected value applies
 // only for this invocation.
 //
 // The persisted TOML file at Path() is read when present. A missing file is
-// acceptable. If the file exists but cannot be parsed, a *ParseError naming the
-// path is returned. If the file is absent and no GitHub identity is supplied by
-// flag or environment variable, a
-// *MissingGitHubUserError is returned.
+// acceptable; so is a missing GitHub identity, which resolves to the empty
+// string. Whether an identity is required depends on the command -- only the
+// ones that name a fork need one -- so that is enforced per command by
+// internal/prereq rather than here. The only error is a *ParseError, for a file
+// that exists but cannot be parsed.
 func (m *manager) Resolve(src Source) (Config, error) {
-	persisted, fileExists, err := m.loadFile()
+	persisted, err := m.loadFile()
 	if err != nil {
 		return Config{}, err
 	}
@@ -150,33 +136,29 @@ func (m *manager) Resolve(src Source) (Config, error) {
 		cfg.Token = v
 	}
 
-	// The configuration file is the only source of a persisted GitHub identity.
-	// When it is absent and no identity was supplied by flag or environment
-	// variable, the only required-without-default value is missing.
-	if !fileExists && cfg.GitHubUser == "" {
-		return Config{}, &MissingGitHubUserError{Path: m.Path()}
-	}
+	cfg.Path = m.Path()
 
 	return cfg, nil
 }
 
-// loadFile reads the persisted configuration file. It reports whether the file
-// exists. A missing file is not an error. A file that exists but cannot be read
-// or parsed yields a *ParseError naming the path.
-func (m *manager) loadFile() (fileConfig, bool, error) {
+// loadFile reads the persisted configuration file, returning a zero fileConfig
+// when it does not exist — an absent file is the normal state before the first
+// `config set`. A file that exists but cannot be read or parsed yields a
+// *ParseError naming the path.
+func (m *manager) loadFile() (fileConfig, error) {
 	path := m.Path()
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fileConfig{}, false, nil
+			return fileConfig{}, nil
 		}
-		return fileConfig{}, false, &ParseError{Path: path, Err: err}
+		return fileConfig{}, &ParseError{Path: path, Err: err}
 	}
 
 	var fc fileConfig
 	if _, err := toml.DecodeFile(path, &fc); err != nil {
-		return fileConfig{}, false, &ParseError{Path: path, Err: err}
+		return fileConfig{}, &ParseError{Path: path, Err: err}
 	}
-	return fc, true, nil
+	return fc, nil
 }
 
 // defaultWorkspaceRoot computes $GOPATH/src/github.com/aws-controllers-k8s,
@@ -185,9 +167,18 @@ func (m *manager) defaultWorkspaceRoot() string {
 	return filepath.Join(m.gopath(), filepath.FromSlash(upstreamOrgPath))
 }
 
-// gopath resolves the effective GOPATH. It prefers `go env GOPATH` and falls
-// back to $HOME/go when the go tool is unavailable or returns nothing.
+// gopath resolves the effective GOPATH: the GOPATH environment variable when it
+// is set, then `go env GOPATH`, then $HOME/go when the go tool is unavailable or
+// returns nothing.
+//
+// Reading the environment first is not just a shortcut. Shelling out to `go` has
+// side effects — among them writing telemetry under the user's config directory —
+// so a caller that already knows its GOPATH (a test with an isolated HOME, for
+// one) can say so and keep this hermetic.
 func (m *manager) gopath() string {
+	if gp := strings.TrimSpace(os.Getenv("GOPATH")); gp != "" {
+		return gp
+	}
 	if out, err := exec.Command("go", "env", "GOPATH").Output(); err == nil {
 		if gp := strings.TrimSpace(string(out)); gp != "" {
 			return gp

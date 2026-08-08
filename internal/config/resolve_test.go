@@ -260,21 +260,38 @@ func TestResolveUnparsableFileError(t *testing.T) {
 	}
 }
 
-// TestResolveMissingIdentityError asserts that when no configuration file
-// exists and no GitHub identity is supplied by flag or environment variable,
-// Resolve returns a *MissingGitHubUserError.
-func TestResolveMissingIdentityError(t *testing.T) {
+// TestResolveMissingIdentityIsNotAnError pins that resolution succeeds with no
+// configuration file and no identity supplied, leaving GitHubUser empty. Whether
+// an identity is required is a per-command question that internal/prereq answers,
+// so failing here would block the commands that legitimately need none
+// (candidates, build, deploy, status).
+func TestResolveMissingIdentityIsNotAnError(t *testing.T) {
 	m := NewManagerWithHome(t.TempDir())
 
-	_, err := m.Resolve(Source{})
-	if err == nil {
-		t.Fatalf("Resolve() error = nil, want *MissingGitHubUserError")
+	cfg, err := m.Resolve(Source{})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
 	}
-	var me *MissingGitHubUserError
-	if !errors.As(err, &me) {
-		t.Fatalf("Resolve() error = %v (%T), want *MissingGitHubUserError", err, err)
+	if cfg.GitHubUser != "" {
+		t.Errorf("GitHubUser = %q, want empty", cfg.GitHubUser)
 	}
-	if me.Path != m.Path() {
-		t.Errorf("MissingGitHubUserError.Path = %q, want %q", me.Path, m.Path())
+	// The defaults still apply, so the rest of the configuration is usable.
+	if cfg.Concurrency != DefaultConcurrency || cfg.RepoPrefix != DefaultRepoPrefix {
+		t.Errorf("defaults not applied: %+v", cfg)
+	}
+}
+
+// TestResolveRecordsConfigPath pins that the resolved configuration carries the
+// file it was resolved against, which is what lets the prerequisite checker name
+// that file when it reports a missing identity.
+func TestResolveRecordsConfigPath(t *testing.T) {
+	m := NewManagerWithHome(t.TempDir())
+
+	cfg, err := m.Resolve(Source{})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if cfg.Path != m.Path() {
+		t.Errorf("Path = %q, want %q", cfg.Path, m.Path())
 	}
 }

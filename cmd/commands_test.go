@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +163,10 @@ func isolateEnv(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv(config.EnvGitHubUser, "")
 	t.Setenv(config.EnvToken, "")
+	// Naming GOPATH keeps configuration resolution from shelling out to
+	// `go env GOPATH`, which writes telemetry into the temporary HOME and then
+	// races t.TempDir's cleanup.
+	t.Setenv("GOPATH", filepath.Join(home, "go"))
 	return home
 }
 
@@ -498,16 +503,52 @@ func TestConfigSetPersistsAndGetReadsBack(t *testing.T) {
 	}
 }
 
-func TestConfigGetMissingIdentityErrors(t *testing.T) {
-	// No config file and no identity supplied: resolution fails.
+// TestConfigGetWithoutIdentitySucceeds pins that inspecting the configuration
+// does not require the value you are inspecting. `config get` on a fresh machine
+// is how a user finds out an identity is not set yet, so failing would be
+// circular.
+func TestConfigGetWithoutIdentitySucceeds(t *testing.T) {
 	isolateEnv(t)
-	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, &recorder{}), "config", "get")
+	_, out, err := runCmd(t, fakeDeps(&fakeChecker{}, &recorder{}), "config", "get")
+	if err != nil {
+		t.Fatalf("config get returned error: %v", err)
+	}
+	if !strings.Contains(out, "github-user:") {
+		t.Errorf("config get output should still list the identity field:\n%s", out)
+	}
+}
+
+// TestCommandWithoutIdentityNeedRunsWithoutOne is the behavior this separation
+// buys: candidates declares no identity need, so it must run on a machine that
+// has never configured one.
+func TestCommandWithoutIdentityNeedRunsWithoutOne(t *testing.T) {
+	isolateEnv(t)
+	chk := &fakeChecker{}
+	rec := &recorder{}
+	if _, _, err := runCmd(t, fakeDeps(chk, rec), "candidates", "ecr"); err != nil {
+		t.Fatalf("candidates returned error without an identity: %v", err)
+	}
+	if !rec.candidatesCalled {
+		t.Error("candidatesRun was not called")
+	}
+}
+
+// TestIdentityNeedIsEnforcedByThePrerequisiteChecker pins the other half: a
+// command that does declare the need still fails without one, and the message
+// names the file to persist it in.
+func TestIdentityNeedIsEnforcedByThePrerequisiteChecker(t *testing.T) {
+	isolateEnv(t)
+	chk := prereq.NewCheckerWithLookPath(func(f string) (string, error) { return "/usr/bin/" + f, nil })
+	_, _, err := runCmd(t, fakeDeps(chk, &recorder{}), "add", "s3", "--"+config.FlagToken, "tok")
 	if err == nil {
 		t.Fatal("expected a missing-identity error, got nil")
 	}
-	var mu *config.MissingGitHubUserError
-	if !errors.As(err, &mu) {
-		t.Fatalf("error type = %T, want *config.MissingGitHubUserError", err)
+	var me *prereq.MissingError
+	if !errors.As(err, &me) {
+		t.Fatalf("error type = %T, want *prereq.MissingError", err)
+	}
+	if !strings.Contains(err.Error(), ".ack-workspace/config") {
+		t.Errorf("error should name the configuration file: %v", err)
 	}
 }
 

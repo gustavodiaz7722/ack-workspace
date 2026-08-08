@@ -146,8 +146,8 @@ Settings are resolved with the following precedence, highest first:
 
 | Setting          | Flag                | Env            | Default                                                  |
 |------------------|---------------------|----------------|----------------------------------------------------------|
-| GitHub identity  | `--github-user`     | `GITHUB_USER`  | _(required)_                                             |
-| GitHub token     | `--token`           | `GITHUB_TOKEN` | _(required for `init`/`add`; never persisted)_           |
+| GitHub identity  | `--github-user`     | `GITHUB_USER`  | _(none; required only by the commands that name a fork)_  |
+| GitHub token     | `--token`           | `GITHUB_TOKEN` | _(none; required by the commands that call the GitHub API; never persisted)_ |
 | Workspace root   | `--workspace-root`  | —              | `$GOPATH/src/github.com/aws-controllers-k8s`             |
 | Fork name prefix | `--prefix`          | —              | `ack-`                                                   |
 | Concurrency      | `--concurrency`     | —              | `4` (valid range: `1`–`32`)                              |

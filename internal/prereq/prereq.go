@@ -152,8 +152,12 @@ func (c *checker) Check(need Need, cfg config.Config) error {
 	}
 
 	if need.Identity && strings.TrimSpace(cfg.GitHubUser) == "" {
-		missing = append(missing,
-			"GitHub identity: no GitHub username is configured; pass --github-user, set GITHUB_USER, or save it in your configuration file")
+		msg := "GitHub identity: no GitHub username is configured; pass --github-user, " +
+			"set GITHUB_USER, or persist it with `ack-workspace config set --github-user <you>`"
+		if cfg.Path != "" {
+			msg += fmt.Sprintf(" (configuration file: %s)", cfg.Path)
+		}
+		missing = append(missing, msg)
 	}
 
 	if len(missing) > 0 {
