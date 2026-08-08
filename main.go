@@ -69,7 +69,7 @@ func report(stdout, stderr io.Writer, res *cmd.Result, err error) int {
 			// rendered its own table/JSON, so there is nothing to print for it here; the
 			// config command stashes no summary at all.
 			if len(summary.Results) > 0 {
-				_ = cli.RenderSummary(stdout, summary, cli.RenderOptions{CreatedLabel: res.CreatedLabel()})
+				_ = cli.RenderSummary(stdout, summary, cli.RenderOptions{SuccessLabel: res.SuccessLabel()})
 			}
 		}
 	}

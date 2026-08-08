@@ -12,7 +12,7 @@ import (
 // result so the count header and the per-repository lines can be asserted.
 func sampleSummary() workspace.Summary {
 	return workspace.Summary{Results: []workspace.Result{
-		{Repo: "runtime", Outcome: workspace.OutcomeCreated},
+		{Repo: "runtime", Outcome: workspace.OutcomeSucceeded},
 		{Repo: "code-generator", Outcome: workspace.OutcomeSkipped, Reason: "directory already exists"},
 		{Repo: "test-infra", Outcome: workspace.OutcomeFailed, Reason: "boom"},
 	}}
@@ -39,7 +39,7 @@ func TestRenderSummary_DefaultCreatedLabel(t *testing.T) {
 
 func TestRenderSummary_AddedLabel(t *testing.T) {
 	var buf bytes.Buffer
-	if err := RenderSummary(&buf, sampleSummary(), RenderOptions{CreatedLabel: "added"}); err != nil {
+	if err := RenderSummary(&buf, sampleSummary(), RenderOptions{SuccessLabel: "added"}); err != nil {
 		t.Fatalf("RenderSummary returned error: %v", err)
 	}
 	out := buf.String()
@@ -52,7 +52,7 @@ func TestRenderSummary_AddedLabel(t *testing.T) {
 	if strings.Contains(out, "created:") {
 		t.Errorf("output should not contain default created header when relabeled.\n%s", out)
 	}
-	// The OutcomeCreated per-repository line is also relabeled "added".
+	// The OutcomeSucceeded per-repository line is also relabeled "added".
 	if !strings.Contains(out, "runtime") || !strings.Contains(out, "added") {
 		t.Errorf("created row not rendered with the added label.\n%s", out)
 	}
@@ -61,9 +61,9 @@ func TestRenderSummary_AddedLabel(t *testing.T) {
 func TestRenderSummary_UpdatedLabel(t *testing.T) {
 	var buf bytes.Buffer
 	summary := workspace.Summary{Results: []workspace.Result{
-		{Repo: "s3-controller", Outcome: workspace.OutcomeCreated, Reason: "updated"},
+		{Repo: "s3-controller", Outcome: workspace.OutcomeSucceeded, Reason: "updated"},
 	}}
-	if err := RenderSummary(&buf, summary, RenderOptions{CreatedLabel: "updated"}); err != nil {
+	if err := RenderSummary(&buf, summary, RenderOptions{SuccessLabel: "updated"}); err != nil {
 		t.Fatalf("RenderSummary returned error: %v", err)
 	}
 	out := buf.String()

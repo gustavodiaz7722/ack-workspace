@@ -194,7 +194,7 @@ func TestRefreshReconcilesToBaseline(t *testing.T) {
 	}
 
 	res := findResult(t, sum, name)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q (reason %q); want created", res.Outcome, res.Reason)
 	}
 

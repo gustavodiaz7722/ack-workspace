@@ -93,7 +93,7 @@ func TestBuild_HappyPathRunsMakeWithEnvOverrides(t *testing.T) {
 	}
 
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 	if !strings.Contains(res.Reason, "feature-x") || !strings.Contains(res.Reason, "ecr-controller") {
@@ -216,7 +216,7 @@ func TestBuild_DryRunTouchesNothing(t *testing.T) {
 		t.Fatalf("Build returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created (preview)", res.Outcome)
 	}
 	if !strings.Contains(res.Reason, "would") {
@@ -248,7 +248,7 @@ func TestBuild_DetachedHeadReported(t *testing.T) {
 		t.Fatalf("Build returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created", res.Outcome)
 	}
 	if !strings.Contains(res.Reason, "detached HEAD") {

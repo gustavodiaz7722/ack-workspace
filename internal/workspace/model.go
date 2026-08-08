@@ -15,11 +15,12 @@ type RepoSpec struct {
 type Outcome string
 
 const (
-	// OutcomeCreated is the success bucket: the repository was processed as the
+	// OutcomeSucceeded is the success bucket: the repository was processed as the
 	// command intended. What that means depends on the command -- cloned, built,
 	// deployed, refreshed, released, or deleted -- so each relabels the bucket to
-	// read in its own terms (see cli.RenderOptions.CreatedLabel).
-	OutcomeCreated Outcome = "created"
+	// read in its own terms (see cli.RenderOptions.SuccessLabel). The value here is
+	// never rendered: the renderer always substitutes that label.
+	OutcomeSucceeded Outcome = "succeeded"
 	// OutcomeSkipped indicates a repository was left untouched because it was
 	// already present, dirty, or had diverged history.
 	OutcomeSkipped Outcome = "skipped"

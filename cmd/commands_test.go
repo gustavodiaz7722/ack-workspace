@@ -318,7 +318,7 @@ func TestInitDelegatesAndStashesSummary(t *testing.T) {
 	isolateEnv(t)
 	chk := &fakeChecker{}
 	rec := &recorder{summary: workspace.Summary{Results: []workspace.Result{
-		{Repo: "runtime", Outcome: workspace.OutcomeCreated},
+		{Repo: "runtime", Outcome: workspace.OutcomeSucceeded},
 	}}}
 
 	res, _, err := runCmd(t, fakeDeps(chk, rec),
@@ -333,7 +333,7 @@ func TestInitDelegatesAndStashesSummary(t *testing.T) {
 	if !ok {
 		t.Fatal("Result holds no summary after a successful init")
 	}
-	if got := summary.Count(workspace.OutcomeCreated); got != 1 {
+	if got := summary.Count(workspace.OutcomeSucceeded); got != 1 {
 		t.Errorf("created count = %d, want 1", got)
 	}
 }
@@ -831,15 +831,15 @@ func TestAttribution_DefaultsLeaveInfrastructureEmpty(t *testing.T) {
 func TestAttribution_UsesGeneratedLabelForSummary(t *testing.T) {
 	isolateEnv(t)
 	rec := &recorder{summary: workspace.Summary{Results: []workspace.Result{
-		{Repo: "ecr-controller", Outcome: workspace.OutcomeCreated, Reason: "updated"},
+		{Repo: "ecr-controller", Outcome: workspace.OutcomeSucceeded, Reason: "updated"},
 	}}}
 	res, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
 		"attribution", "ecr", "--"+config.FlagGitHubUser, "octocat")
 	if err != nil {
 		t.Fatalf("execute returned error: %v", err)
 	}
-	if res.CreatedLabel() != "generated" {
-		t.Errorf("created label = %q, want \"generated\"", res.CreatedLabel())
+	if res.SuccessLabel() != "generated" {
+		t.Errorf("created label = %q, want \"generated\"", res.SuccessLabel())
 	}
 }
 

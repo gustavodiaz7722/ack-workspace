@@ -149,7 +149,7 @@ func TestRefresh_SuccessfulReconcile(t *testing.T) {
 	}
 
 	res := resultsByRepo(sum)["autoscaling-controller"]
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("expected created, got %s (%+v)", res.Outcome, res)
 	}
 
@@ -291,7 +291,7 @@ func TestRefresh_InvalidNameInOnly(t *testing.T) {
 	if byRepo["bogus"].Outcome != workspace.OutcomeFailed {
 		t.Errorf("expected bogus failed, got %s", byRepo["bogus"].Outcome)
 	}
-	if byRepo["alpha"].Outcome != workspace.OutcomeCreated {
+	if byRepo["alpha"].Outcome != workspace.OutcomeSucceeded {
 		t.Errorf("expected alpha refreshed, got %s", byRepo["alpha"].Outcome)
 	}
 }
@@ -311,7 +311,7 @@ func TestRefresh_DryRunTouchesNothing(t *testing.T) {
 	}
 
 	res := resultsByRepo(sum)["alpha"]
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("expected would-refresh (created), got %s (%+v)", res.Outcome, res)
 	}
 	if !strings.Contains(res.Reason, "would") {

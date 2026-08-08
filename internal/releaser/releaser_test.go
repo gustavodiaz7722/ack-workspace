@@ -114,7 +114,7 @@ func TestRelease_HappyPathPushesAndOpensPR(t *testing.T) {
 	}
 
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 	if !strings.Contains(res.Reason, "v1.0.1") || !strings.Contains(res.Reason, "pull/42") {
@@ -221,7 +221,7 @@ func TestRelease_SkipPRPushesButDoesNotOpenPR(t *testing.T) {
 		t.Fatalf("Release returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 	if !strings.Contains(res.Reason, "PR skipped") {
@@ -363,7 +363,7 @@ func TestRelease_DryRunTouchesNothing(t *testing.T) {
 		t.Fatalf("Release returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created (preview)", res.Outcome)
 	}
 	if !strings.Contains(res.Reason, "would") {

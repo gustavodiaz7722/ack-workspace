@@ -169,7 +169,7 @@ func TestGenerate_HappyPathWritesDocument(t *testing.T) {
 	}
 
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 
@@ -206,7 +206,7 @@ func TestGenerate_FullControllerNameNormalizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if res := only(t, summary); res.Outcome != workspace.OutcomeCreated {
+	if res := only(t, summary); res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 }
@@ -292,7 +292,7 @@ func TestGenerate_ValidTargetsProceedAlongsideInvalidOnes(t *testing.T) {
 	for _, r := range summary.Results {
 		byRepo[r.Repo] = r.Outcome
 	}
-	if byRepo["ecr-controller"] != workspace.OutcomeCreated {
+	if byRepo["ecr-controller"] != workspace.OutcomeSucceeded {
 		t.Errorf("ecr-controller = %q, want created", byRepo["ecr-controller"])
 	}
 	if byRepo["nosuch-controller"] != workspace.OutcomeFailed {
@@ -339,7 +339,7 @@ func TestGenerate_PollsUntilTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if res := only(t, summary); res.Outcome != workspace.OutcomeCreated {
+	if res := only(t, summary); res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 	if backend.statusCalls != 3 {
@@ -414,7 +414,7 @@ func TestGenerate_UnchangedDocumentIsReportedAsSuch(t *testing.T) {
 		t.Fatalf("Generate returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created", res.Outcome)
 	}
 	if !strings.Contains(res.Reason, "already up to date") {
@@ -452,7 +452,7 @@ func TestGenerate_DryRunProvisionsNothing(t *testing.T) {
 		t.Fatalf("Generate returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created (preview)", res.Outcome)
 	}
 	if !strings.Contains(res.Reason, "would") {

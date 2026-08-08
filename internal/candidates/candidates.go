@@ -322,7 +322,7 @@ func (ix *Indexer) indexController(
 			})
 			continue
 		}
-		results = append(results, workspace.Result{Repo: label, Outcome: workspace.OutcomeCreated})
+		results = append(results, workspace.Result{Repo: label, Outcome: workspace.OutcomeSucceeded})
 		ix.reportResource(idx, opts)
 	}
 

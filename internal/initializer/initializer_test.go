@@ -65,7 +65,7 @@ func TestInit_AllCreated(t *testing.T) {
 	if got := len(sum.Results); got != len(CommonRepositories) {
 		t.Fatalf("expected %d results, got %d", len(CommonRepositories), got)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories) {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != len(CommonRepositories) {
 		t.Fatalf("expected %d created, got %d (results=%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	if sum.HasFailures() {
@@ -79,7 +79,7 @@ func TestInit_AllCreated(t *testing.T) {
 	// Each repo should have been cloned and had origin+upstream configured.
 	byRepo := resultsByRepo(sum)
 	for _, name := range CommonRepositories {
-		if byRepo[name].Outcome != workspace.OutcomeCreated {
+		if byRepo[name].Outcome != workspace.OutcomeSucceeded {
 			t.Errorf("repo %s: expected created, got %s", name, byRepo[name].Outcome)
 		}
 	}
@@ -121,7 +121,7 @@ func TestInit_SkipExistingDirectory(t *testing.T) {
 		}
 	}
 	// The other repos should have been created.
-	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories)-1 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != len(CommonRepositories)-1 {
 		t.Fatalf("expected %d created, got %d", len(CommonRepositories)-1, got)
 	}
 	if got := sum.Count(workspace.OutcomeSkipped); got != 1 {
@@ -143,7 +143,7 @@ func TestInit_ForkMissingThenCreated(t *testing.T) {
 	if n := gh.CallCount("CreateFork"); n != len(CommonRepositories) {
 		t.Fatalf("expected %d CreateFork calls, got %d", len(CommonRepositories), n)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories) {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != len(CommonRepositories) {
 		t.Fatalf("expected %d created, got %d (results=%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	// CreateFork should target the upstream repos with the prefixed fork name.
@@ -334,7 +334,7 @@ func assertNoMutatingGitCalls(t *testing.T, runner *git.MockRunner) {
 }
 
 // TestInit_DryRunNoMutationsForkPresent verifies that with forks already
-// present, dry-run computes a per-repo preview (OutcomeCreated with a "would
+// present, dry-run computes a per-repo preview (OutcomeSucceeded with a "would
 // ..." reason) using only read-only operations, invoking no CreateFork and no
 // mutating git command.
 func TestInit_DryRunNoMutationsForkPresent(t *testing.T) {
@@ -352,7 +352,7 @@ func TestInit_DryRunNoMutationsForkPresent(t *testing.T) {
 	if got := len(sum.Results); got != len(CommonRepositories) {
 		t.Fatalf("expected %d results, got %d", len(CommonRepositories), got)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories) {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != len(CommonRepositories) {
 		t.Fatalf("expected %d would-create previews, got %d (%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	if sum.HasFailures() {
@@ -384,7 +384,7 @@ func TestInit_DryRunForkMissingPreview(t *testing.T) {
 		t.Fatalf("Init returned unexpected error: %v", err)
 	}
 
-	if got := sum.Count(workspace.OutcomeCreated); got != len(CommonRepositories) {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != len(CommonRepositories) {
 		t.Fatalf("expected %d would-create previews, got %d (%+v)", len(CommonRepositories), got, sum.Results)
 	}
 	for _, r := range sum.Results {

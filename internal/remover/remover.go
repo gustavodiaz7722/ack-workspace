@@ -68,7 +68,7 @@ func New() *Remover { return &Remover{} }
 
 // Remove deletes the local clone and GitHub fork of each identified controller,
 // returning a Summary in which every processed target is recorded in exactly
-// one of the removed (OutcomeCreated), skipped, or failed buckets.
+// one of the removed (OutcomeSucceeded), skipped, or failed buckets.
 //
 // The special "all" identifier expands to every managed controller repository
 // discovered under the workspace root; it supersedes any other identifiers. An
@@ -196,7 +196,7 @@ func (r *Remover) process(ctx context.Context, ap app.App, name string, opts Opt
 
 	// Dry-run: report the action without performing it.
 	if ap.DryRun {
-		return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: previewReason(localExists, forkExists, opts)}
+		return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: previewReason(localExists, forkExists, opts)}
 	}
 
 	// Delete the fork first (the irreversible remote action). On failure leave the
@@ -218,7 +218,7 @@ func (r *Remover) process(ctx context.Context, ap app.App, name string, opts Opt
 		}
 	}
 
-	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: removedReason(localExists, forkExists, opts)}
+	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: removedReason(localExists, forkExists, opts)}
 }
 
 // previewReason describes the action a dry-run would take.

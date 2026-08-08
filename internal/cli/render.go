@@ -2,10 +2,9 @@
 // ack-workspace batch commands and centralizes the labels used when presenting
 // repository outcomes.
 //
-// The status command renders its own table/JSON via internal/inspector; this
-// package handles the created/skipped/failed summary produced by the batch
-// commands (init, add, sync). The process entrypoint (main.go) maps the same
-// Summary to an exit code; see internal/workspace.Summary.HasFailures.
+// The status command renders its own table or JSON through internal/inspector, so
+// it does not come through here. main.go maps the same Summary to an exit code;
+// see workspace.Summary.HasFailures.
 package cli
 
 import (
@@ -16,39 +15,33 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
-// defaultCreatedLabel is the label used for the OutcomeCreated bucket when no
-// override is supplied. The init command uses it ("created"); add and sync pass
-// their own labels ("added", "updated") to match the requirement wording
-// (Requirement 4.9 for add).
-const defaultCreatedLabel = "created"
+// defaultSuccessLabel labels the success bucket when a command supplies no
+// override of its own.
+const defaultSuccessLabel = "created"
 
 // RenderOptions configures how a Summary is rendered.
 type RenderOptions struct {
-	// CreatedLabel overrides the label used for the OutcomeCreated bucket in both
-	// the count header and the per-repository lines. When empty, "created" is
-	// used. The add command passes "added" so OutcomeCreated renders as "added"
-	//; the sync command passes "updated".
-	CreatedLabel string
+	// SuccessLabel overrides the label used for the success bucket in both the
+	// count header and the per-repository lines, so each command's summary reads in
+	// its own terms: add passes "added", deploy "deployed", remove "removed". When
+	// empty, "created" is used.
+	SuccessLabel string
 }
 
-// RenderSummary writes a human-readable rendering of summary to w. The output
-// is a count header (created/added, skipped, and failed totals) followed by one
-// line per repository giving its name, outcome, and reason (when present).
-//
-// The OutcomeCreated bucket is labeled using opts.CreatedLabel (defaulting to
-// "created"); skipped and failed always use their literal names. Writing to an
-// injectable io.Writer keeps the rendering testable.
+// RenderSummary writes summary to w: a count header, then one line per
+// repository giving its name, outcome, and reason when it has one. Skipped and
+// failed always use their literal names; only the success bucket is relabeled.
 func RenderSummary(w io.Writer, summary workspace.Summary, opts RenderOptions) error {
-	createdLabel := opts.CreatedLabel
-	if createdLabel == "" {
-		createdLabel = defaultCreatedLabel
+	successLabel := opts.SuccessLabel
+	if successLabel == "" {
+		successLabel = defaultSuccessLabel
 	}
 
-	// Count header. OutcomeCreated is reported under the (possibly overridden)
+	// Count header. OutcomeSucceeded is reported under the (possibly overridden)
 	// created label so the add summary reads "added: N".
 	if _, err := fmt.Fprintf(w, "%s: %d, skipped: %d, failed: %d\n",
-		createdLabel,
-		summary.Count(workspace.OutcomeCreated),
+		successLabel,
+		summary.Count(workspace.OutcomeSucceeded),
 		summary.Count(workspace.OutcomeSkipped),
 		summary.Count(workspace.OutcomeFailed),
 	); err != nil {
@@ -60,28 +53,27 @@ func RenderSummary(w io.Writer, summary workspace.Summary, opts RenderOptions) e
 	}
 
 	// Per-repository lines, column-aligned. The reason column is emitted only when
-	// a result carries one, so successful created rows stay uncluttered.
+	// a result carries one, so successful rows stay uncluttered.
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, r := range summary.Results {
 		if r.Reason != "" {
-			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Repo, outcomeLabel(r.Outcome, createdLabel), r.Reason); err != nil {
+			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Repo, outcomeLabel(r.Outcome, successLabel), r.Reason); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t\n", r.Repo, outcomeLabel(r.Outcome, createdLabel)); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t\n", r.Repo, outcomeLabel(r.Outcome, successLabel)); err != nil {
 			return err
 		}
 	}
 	return tw.Flush()
 }
 
-// outcomeLabel maps an Outcome to its display label, substituting createdLabel
-// for OutcomeCreated so each command's wording (created/added/updated) is used
-// consistently in both the header and the per-repository lines.
-func outcomeLabel(o workspace.Outcome, createdLabel string) string {
-	if o == workspace.OutcomeCreated {
-		return createdLabel
+// outcomeLabel maps an Outcome to its display label, substituting successLabel
+// for OutcomeSucceeded.
+func outcomeLabel(o workspace.Outcome, successLabel string) string {
+	if o == workspace.OutcomeSucceeded {
+		return successLabel
 	}
 	return string(o)
 }

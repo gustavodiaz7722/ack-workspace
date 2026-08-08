@@ -271,7 +271,7 @@ func TestDeploy_BootstrapsMissingCluster(t *testing.T) {
 		t.Fatalf("Deploy returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 
@@ -333,7 +333,7 @@ func TestDeploy_ReusesExistingClusterAndStillRepointsKubeconfig(t *testing.T) {
 		t.Fatalf("Deploy returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 	if prov.createdSpec != nil {
@@ -408,7 +408,7 @@ func TestDeploy_DryRunPreviewsBootstrapWithoutCreating(t *testing.T) {
 		t.Fatalf("Deploy returned error: %v", err)
 	}
 	res := only(t, summary)
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created; reason: %s", res.Outcome, res.Reason)
 	}
 	if prov.createdSpec != nil || prov.kubeconfig != nil || prov.identity != nil {

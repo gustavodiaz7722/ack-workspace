@@ -118,7 +118,7 @@ func (i *Initializer) process(ctx context.Context, a app.App, spec workspace.Rep
 		}
 		return workspace.Result{
 			Repo:    spec.UpstreamName,
-			Outcome: workspace.OutcomeCreated,
+			Outcome: workspace.OutcomeSucceeded,
 			Reason:  reason,
 		}
 	}
@@ -153,7 +153,7 @@ func (i *Initializer) process(ctx context.Context, a app.App, spec workspace.Rep
 	// record the repository as created on success.
 	return workspace.Result{
 		Repo:    spec.UpstreamName,
-		Outcome: workspace.OutcomeCreated,
+		Outcome: workspace.OutcomeSucceeded,
 	}
 }
 

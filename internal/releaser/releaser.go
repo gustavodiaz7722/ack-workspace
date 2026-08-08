@@ -287,7 +287,7 @@ func (r *Releaser) preview(name, branch, base, version string, opts Options) wor
 	if !opts.SkipPR {
 		reason += fmt.Sprintf("; then open a PR to %s/%s", upstreamOwner, name)
 	}
-	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
+	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
 
 // commitMessage builds the conventional release commit/PR title for version.
@@ -336,9 +336,9 @@ func (execScriptRunner) Run(ctx context.Context, codegenDir, service, version st
 	return nil
 }
 
-// released builds a successful (OutcomeCreated) Result with the given reason.
+// released builds a successful (OutcomeSucceeded) Result with the given reason.
 func released(name, reason string) workspace.Result {
-	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
+	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
 
 // skipped builds a skipped Result carrying a human-readable reason.

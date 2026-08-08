@@ -63,26 +63,25 @@ func (e *UsageError) Error() string { return e.Msg }
 type Result struct {
 	summary      workspace.Summary
 	hasSummary   bool
-	createdLabel string
+	successLabel string
 }
 
-// set records the Summary produced by a command, leaving the created-bucket
-// label at its default ("created"). It is called by commands whose
-// OutcomeCreated bucket is presented as "created" (init) or that produce a
-// neutral summary (status).
+// set records the Summary produced by a command, leaving the success-bucket label
+// at its default ("created"). It is called by init, whose summary reads that way
+// already, and by status, which produces a neutral summary.
 func (r *Result) set(s workspace.Summary) {
 	r.summary = s
 	r.hasSummary = true
 }
 
 // setLabeled records the Summary together with the label the renderer should
-// use for the OutcomeCreated bucket, so the summary reads in the command's own
+// use for the OutcomeSucceeded bucket, so the summary reads in the command's own
 // terms ("added", "refreshed", "deployed", …) rather than always saying
 // "created".
-func (r *Result) setLabeled(s workspace.Summary, createdLabel string) {
+func (r *Result) setLabeled(s workspace.Summary, successLabel string) {
 	r.summary = s
 	r.hasSummary = true
-	r.createdLabel = createdLabel
+	r.successLabel = successLabel
 }
 
 // Summary returns the stashed Summary and whether a command set one. A command
@@ -91,11 +90,11 @@ func (r *Result) Summary() (summary workspace.Summary, ok bool) {
 	return r.summary, r.hasSummary
 }
 
-// CreatedLabel returns the label the entrypoint should use for the
-// OutcomeCreated bucket when rendering the Summary. It is empty when a command
+// SuccessLabel returns the label the entrypoint should use for the
+// OutcomeSucceeded bucket when rendering the Summary. It is empty when a command
 // did not override it, in which case the renderer falls back to "created".
-func (r *Result) CreatedLabel() string {
-	return r.createdLabel
+func (r *Result) SuccessLabel() string {
+	return r.successLabel
 }
 
 // deps holds the injectable collaborators the subcommands delegate to. Wiring

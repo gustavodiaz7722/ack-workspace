@@ -122,7 +122,7 @@ func (r *Refresher) process(ctx context.Context, a app.App, path, name string) w
 	if a.DryRun {
 		return workspace.Result{
 			Repo:    name,
-			Outcome: workspace.OutcomeCreated,
+			Outcome: workspace.OutcomeSucceeded,
 			Reason: fmt.Sprintf(
 				"would sync fork %s from upstream, fetch tags, discard local changes, reset %s to %s, and fetch %s",
 				fork, defaultBranch, upstreamRef, originRemote),
@@ -163,7 +163,7 @@ func (r *Refresher) process(ctx context.Context, a app.App, path, name string) w
 
 	return workspace.Result{
 		Repo:    name,
-		Outcome: workspace.OutcomeCreated,
+		Outcome: workspace.OutcomeSucceeded,
 		Reason:  fmt.Sprintf("refreshed: %s reset to upstream, fork synced, tags updated", defaultBranch),
 	}
 }

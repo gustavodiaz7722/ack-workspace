@@ -428,7 +428,7 @@ func (d *Deployer) preview(name string, clusterExists bool, imageRef string, p D
 	reason := fmt.Sprintf(
 		"%swould point the kubeconfig at %s, ensure ECR repository, build %s from local source, push it, and helm upgrade --install %s into namespace %s under service account %q",
 		bootstrap, describeCluster(clusterExists), imageRef, p.Release, p.Namespace, p.ServiceAccount)
-	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
+	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
 
 // execBuilder is the production Builder. It invokes the code-generator image
@@ -602,9 +602,9 @@ func firstNonEmptyEnv(names ...string) string {
 	return ""
 }
 
-// deployed builds a successful (OutcomeCreated) Result with the given reason.
+// deployed builds a successful (OutcomeSucceeded) Result with the given reason.
 func deployed(name, reason string) workspace.Result {
-	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
+	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
 
 // failed builds a failed Result carrying the underlying error and its text.

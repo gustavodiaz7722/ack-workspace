@@ -207,7 +207,7 @@ func (b *Builder) preview(name, alias, branch, codegenPath string, env []string)
 	reason := fmt.Sprintf(
 		"would run `make %s SERVICE=%s` in %s against branch %s with %s",
 		makeTarget, alias, codegenPath, branch, strings.Join(env, " "))
-	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
+	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
 
 // buildEnv assembles the "KEY=VALUE" environment overrides the code-generator
@@ -256,9 +256,9 @@ func (execMakeRunner) Run(ctx context.Context, codegenDir, service string, env [
 	return nil
 }
 
-// built builds a successful (OutcomeCreated) Result with the given reason.
+// built builds a successful (OutcomeSucceeded) Result with the given reason.
 func built(name, reason string) workspace.Result {
-	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
+	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
 
 // failed builds a failed Result carrying the underlying error and its text.

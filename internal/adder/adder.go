@@ -61,7 +61,7 @@ func New() *Adder { return &Adder{} }
 
 // Add processes each supplied service identifier independently and returns a
 // Summary in which every processed identifier is recorded in exactly one of the
-// added (OutcomeCreated), skipped, or failed buckets.
+// added (OutcomeSucceeded), skipped, or failed buckets.
 //
 // The returned error is non-nil only for the pre-flight rejection of an empty
 // identifier list; in that case no modification is made under the workspace
@@ -232,7 +232,7 @@ func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec
 		}
 		return workspace.Result{
 			Repo:    spec.UpstreamName,
-			Outcome: workspace.OutcomeCreated,
+			Outcome: workspace.OutcomeSucceeded,
 			Reason:  reason,
 		}
 	}
@@ -275,10 +275,10 @@ func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec
 		return failed(spec, fmt.Errorf("configuring upstream remote: %w", err))
 	}
 
-	// record the repository as added (OutcomeCreated) on success.
+	// record the repository as added (OutcomeSucceeded) on success.
 	return workspace.Result{
 		Repo:    spec.UpstreamName,
-		Outcome: workspace.OutcomeCreated,
+		Outcome: workspace.OutcomeSucceeded,
 	}
 }
 

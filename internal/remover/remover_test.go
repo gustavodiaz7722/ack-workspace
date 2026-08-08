@@ -99,7 +99,7 @@ func TestRemove_DeletesLocalAndFork(t *testing.T) {
 	}
 
 	res := resultsByRepo(sum)["s3-controller"]
-	if res.Outcome != workspace.OutcomeCreated {
+	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("expected removed (created bucket), got %s (%q)", res.Outcome, res.Reason)
 	}
 	// The local clone is gone.
@@ -126,7 +126,7 @@ func TestRemove_KeepForkDeletesOnlyLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Remove returned unexpected error: %v", err)
 	}
-	if resultsByRepo(sum)["s3-controller"].Outcome != workspace.OutcomeCreated {
+	if resultsByRepo(sum)["s3-controller"].Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("expected removed, got %+v", sum.Results)
 	}
 	if dirExists(dir) {
@@ -185,7 +185,7 @@ func TestRemove_DirtyForcedRemoves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Remove returned unexpected error: %v", err)
 	}
-	if resultsByRepo(sum)["s3-controller"].Outcome != workspace.OutcomeCreated {
+	if resultsByRepo(sum)["s3-controller"].Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("expected forced removal to succeed, got %+v", sum.Results)
 	}
 	if dirExists(dir) {
@@ -250,7 +250,7 @@ func TestRemove_AllExpandsToWorkspaceControllers(t *testing.T) {
 		t.Fatalf("expected exactly 2 controllers removed, got %d (%+v)", len(sum.Results), sum.Results)
 	}
 	for _, name := range []string{"s3-controller", "sns-controller"} {
-		if byRepo[name].Outcome != workspace.OutcomeCreated {
+		if byRepo[name].Outcome != workspace.OutcomeSucceeded {
 			t.Errorf("expected %s removed, got %+v", name, byRepo[name])
 		}
 	}
@@ -275,7 +275,7 @@ func TestRemove_DryRunDeletesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Remove returned unexpected error: %v", err)
 	}
-	if resultsByRepo(sum)["s3-controller"].Outcome != workspace.OutcomeCreated {
+	if resultsByRepo(sum)["s3-controller"].Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("expected a would-remove preview, got %+v", sum.Results)
 	}
 	// Dry-run must not delete the local clone or the fork.

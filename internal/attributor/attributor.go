@@ -152,7 +152,7 @@ func NewWithWriter(b Backend, out io.Writer) *Attributor {
 
 // Generate regenerates ATTRIBUTION.md for each identified controller and
 // returns a Summary recording every target in exactly one of the generated
-// (OutcomeCreated), skipped, or failed buckets.
+// (OutcomeSucceeded), skipped, or failed buckets.
 //
 // The special "all" identifier expands to every managed controller under the
 // workspace root and supersedes any other identifier. Infrastructure is
@@ -391,7 +391,7 @@ func (a *Attributor) preview(ctx context.Context, ap app.App, name string, opts 
 	infra := opts.Infra.withDefaults()
 	return workspace.Result{
 		Repo:    name,
-		Outcome: workspace.OutcomeCreated,
+		Outcome: workspace.OutcomeSucceeded,
 		Reason: fmt.Sprintf(
 			"would run attribution-gen on CodeBuild project %s (image %s, golang %s) against %s@%s and write %s",
 			infra.Project, infra.Image, infra.GoVersion, p.repoURL, p.ref, a.destination(p, opts, true)),
@@ -442,7 +442,7 @@ func (a *Attributor) process(ctx context.Context, p plan, opts Options, prov Pro
 	}
 	return workspace.Result{
 		Repo:    name,
-		Outcome: workspace.OutcomeCreated,
+		Outcome: workspace.OutcomeSucceeded,
 		Reason:  fmt.Sprintf("%s (%s, %d bytes, from %s@%s)", verb, dest, len(data), p.repoURL, p.ref),
 	}
 }

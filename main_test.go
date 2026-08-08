@@ -15,7 +15,7 @@ import (
 // failureSummary returns a summary that contains a failed result.
 func failureSummary() workspace.Summary {
 	return workspace.Summary{Results: []workspace.Result{
-		{Repo: "runtime", Outcome: workspace.OutcomeCreated},
+		{Repo: "runtime", Outcome: workspace.OutcomeSucceeded},
 		{Repo: "test-infra", Outcome: workspace.OutcomeFailed, Reason: "boom"},
 	}}
 }
@@ -23,7 +23,7 @@ func failureSummary() workspace.Summary {
 // cleanSummary returns a failure-free summary (the shape dry-run also produces).
 func cleanSummary() workspace.Summary {
 	return workspace.Summary{Results: []workspace.Result{
-		{Repo: "runtime", Outcome: workspace.OutcomeCreated},
+		{Repo: "runtime", Outcome: workspace.OutcomeSucceeded},
 		{Repo: "code-generator", Outcome: workspace.OutcomeSkipped, Reason: "directory already exists"},
 	}}
 }

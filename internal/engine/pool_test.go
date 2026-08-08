@@ -19,7 +19,7 @@ func makeTasks(n int) []Task {
 	for i := 0; i < n; i++ {
 		repo := fmt.Sprintf("repo-%02d", n-i) // reverse order on purpose
 		tasks[i] = func(_ context.Context) workspace.Result {
-			return workspace.Result{Repo: repo, Outcome: workspace.OutcomeCreated}
+			return workspace.Result{Repo: repo, Outcome: workspace.OutcomeSucceeded}
 		}
 	}
 	return tasks
@@ -49,7 +49,7 @@ func TestRunBoundedConcurrency(t *testing.T) {
 					}
 					time.Sleep(2 * time.Millisecond)
 					atomic.AddInt32(&inFlight, -1)
-					return workspace.Result{Repo: repo, Outcome: workspace.OutcomeCreated}
+					return workspace.Result{Repo: repo, Outcome: workspace.OutcomeSucceeded}
 				}
 			}
 
@@ -84,7 +84,7 @@ func TestRunContinueOnError(t *testing.T) {
 					Reason:  "boom",
 				}
 			}
-			return workspace.Result{Repo: repo, Outcome: workspace.OutcomeCreated}
+			return workspace.Result{Repo: repo, Outcome: workspace.OutcomeSucceeded}
 		}
 	}
 
@@ -157,7 +157,7 @@ func TestRunNonPositiveConcurrency(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 			atomic.AddInt32(&inFlight, -1)
-			return workspace.Result{Repo: repo, Outcome: workspace.OutcomeCreated}
+			return workspace.Result{Repo: repo, Outcome: workspace.OutcomeSucceeded}
 		}
 	}
 

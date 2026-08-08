@@ -14,26 +14,26 @@ func TestSummaryCount(t *testing.T) {
 		{
 			name:    "empty result set",
 			summary: Summary{},
-			want:    map[Outcome]int{OutcomeCreated: 0, OutcomeSkipped: 0, OutcomeFailed: 0},
+			want:    map[Outcome]int{OutcomeSucceeded: 0, OutcomeSkipped: 0, OutcomeFailed: 0},
 		},
 		{
 			name: "all success",
 			summary: Summary{Results: []Result{
-				{Repo: "runtime", Outcome: OutcomeCreated},
-				{Repo: "code-generator", Outcome: OutcomeCreated},
-				{Repo: "test-infra", Outcome: OutcomeCreated},
+				{Repo: "runtime", Outcome: OutcomeSucceeded},
+				{Repo: "code-generator", Outcome: OutcomeSucceeded},
+				{Repo: "test-infra", Outcome: OutcomeSucceeded},
 			}},
-			want: map[Outcome]int{OutcomeCreated: 3, OutcomeSkipped: 0, OutcomeFailed: 0},
+			want: map[Outcome]int{OutcomeSucceeded: 3, OutcomeSkipped: 0, OutcomeFailed: 0},
 		},
 		{
 			name: "mixed outcomes",
 			summary: Summary{Results: []Result{
-				{Repo: "runtime", Outcome: OutcomeCreated},
+				{Repo: "runtime", Outcome: OutcomeSucceeded},
 				{Repo: "code-generator", Outcome: OutcomeSkipped, Reason: "already present"},
 				{Repo: "test-infra", Outcome: OutcomeFailed, Reason: "clone failed", Err: errors.New("boom")},
 				{Repo: "s3-controller", Outcome: OutcomeSkipped, Reason: "already present"},
 			}},
-			want: map[Outcome]int{OutcomeCreated: 1, OutcomeSkipped: 2, OutcomeFailed: 1},
+			want: map[Outcome]int{OutcomeSucceeded: 1, OutcomeSkipped: 2, OutcomeFailed: 1},
 		},
 	}
 
@@ -62,7 +62,7 @@ func TestSummaryHasFailures(t *testing.T) {
 		{
 			name: "all success has no failures",
 			summary: Summary{Results: []Result{
-				{Repo: "runtime", Outcome: OutcomeCreated},
+				{Repo: "runtime", Outcome: OutcomeSucceeded},
 				{Repo: "code-generator", Outcome: OutcomeSkipped},
 			}},
 			want: false,
@@ -70,7 +70,7 @@ func TestSummaryHasFailures(t *testing.T) {
 		{
 			name: "mixed with a failure has failures",
 			summary: Summary{Results: []Result{
-				{Repo: "runtime", Outcome: OutcomeCreated},
+				{Repo: "runtime", Outcome: OutcomeSucceeded},
 				{Repo: "test-infra", Outcome: OutcomeFailed, Err: errors.New("boom")},
 			}},
 			want: true,

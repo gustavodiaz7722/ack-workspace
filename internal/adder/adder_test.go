@@ -107,12 +107,12 @@ func TestAdd_NormalizationBareAndFullForm(t *testing.T) {
 		t.Fatalf("Add returned unexpected error: %v", err)
 	}
 
-	if got := sum.Count(workspace.OutcomeCreated); got != 2 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != 2 {
 		t.Fatalf("expected 2 added, got %d (results=%+v)", got, sum.Results)
 	}
 	byRepo := resultsByRepo(sum)
 	for _, name := range []string{"s3-controller", "sns-controller"} {
-		if byRepo[name].Outcome != workspace.OutcomeCreated {
+		if byRepo[name].Outcome != workspace.OutcomeSucceeded {
 			t.Errorf("repo %s: expected created, got %s", name, byRepo[name].Outcome)
 		}
 	}
@@ -169,7 +169,7 @@ func TestAdd_ResolutionFailureContinues(t *testing.T) {
 	if got := len(sum.Results); got != 3 {
 		t.Fatalf("expected 3 results, got %d (results=%+v)", got, sum.Results)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != 1 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != 1 {
 		t.Fatalf("expected 1 added, got %d (results=%+v)", got, sum.Results)
 	}
 	if got := sum.Count(workspace.OutcomeFailed); got != 2 {
@@ -177,7 +177,7 @@ func TestAdd_ResolutionFailureContinues(t *testing.T) {
 	}
 
 	byRepo := resultsByRepo(sum)
-	if byRepo["s3-controller"].Outcome != workspace.OutcomeCreated {
+	if byRepo["s3-controller"].Outcome != workspace.OutcomeSucceeded {
 		t.Errorf("s3-controller: expected created, got %s", byRepo["s3-controller"].Outcome)
 	}
 	if byRepo["bad-controller"].Outcome != workspace.OutcomeFailed {
@@ -309,7 +309,7 @@ func TestAdd_SuccessConfiguresRemotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add returned unexpected error: %v", err)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != 1 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != 1 {
 		t.Fatalf("expected 1 added, got %d (results=%+v)", got, sum.Results)
 	}
 	if gh.CallCount("CreateFork") != 0 {
@@ -382,7 +382,7 @@ func TestAdd_DryRunForkPresentPreview(t *testing.T) {
 		t.Fatalf("Add returned unexpected error: %v", err)
 	}
 
-	if got := sum.Count(workspace.OutcomeCreated); got != 1 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != 1 {
 		t.Fatalf("expected 1 would-create preview, got %d (%+v)", got, sum.Results)
 	}
 	if r := resultsByRepo(sum)["s3-controller"]; r.Reason != "would clone existing fork" {
@@ -408,7 +408,7 @@ func TestAdd_DryRunForkMissingPreview(t *testing.T) {
 		t.Fatalf("Add returned unexpected error: %v", err)
 	}
 
-	if got := sum.Count(workspace.OutcomeCreated); got != 1 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != 1 {
 		t.Fatalf("expected 1 would-create preview, got %d (%+v)", got, sum.Results)
 	}
 	if r := resultsByRepo(sum)["s3-controller"]; r.Reason != "would create fork and clone" {
@@ -504,12 +504,12 @@ func TestAdd_AllExpandsToOrgControllers(t *testing.T) {
 	if got := len(sum.Results); got != 2 {
 		t.Fatalf("expected 2 results, got %d (results=%+v)", got, sum.Results)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != 2 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != 2 {
 		t.Fatalf("expected 2 added, got %d (results=%+v)", got, sum.Results)
 	}
 	byRepo := resultsByRepo(sum)
 	for _, name := range []string{"s3-controller", "sns-controller"} {
-		if byRepo[name].Outcome != workspace.OutcomeCreated {
+		if byRepo[name].Outcome != workspace.OutcomeSucceeded {
 			t.Errorf("repo %s: expected created, got %s", name, byRepo[name].Outcome)
 		}
 	}
@@ -543,7 +543,7 @@ func TestAdd_AllSupersedesOtherIdentifiers(t *testing.T) {
 	if _, ok := byRepo["s3-controller"]; ok {
 		t.Errorf("s3-controller should not have been processed when 'all' is given")
 	}
-	if byRepo["sns-controller"].Outcome != workspace.OutcomeCreated {
+	if byRepo["sns-controller"].Outcome != workspace.OutcomeSucceeded {
 		t.Errorf("expected sns-controller created, got %+v", byRepo["sns-controller"])
 	}
 	if len(sum.Results) != 1 {
@@ -618,7 +618,7 @@ func TestAdd_AllCaseInsensitive(t *testing.T) {
 	if gh.CallCount("ListOrgRepos") != 1 {
 		t.Errorf("expected 'ALL' to trigger org listing")
 	}
-	if sum.Count(workspace.OutcomeCreated) != 1 {
+	if sum.Count(workspace.OutcomeSucceeded) != 1 {
 		t.Errorf("expected 1 added, got %+v", sum.Results)
 	}
 }
@@ -640,7 +640,7 @@ func TestAdd_AllDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add returned unexpected error: %v", err)
 	}
-	if got := sum.Count(workspace.OutcomeCreated); got != 2 {
+	if got := sum.Count(workspace.OutcomeSucceeded); got != 2 {
 		t.Fatalf("expected 2 previewed, got %d (%+v)", got, sum.Results)
 	}
 	// Dry-run must not create forks or run git.
