@@ -20,8 +20,8 @@ import (
 var validDoc = []byte(attributionHeader + "\n\n* `github.com/example/dep`\n")
 
 // fakeBackend is a scriptable, recording Backend. It lets the whole flow run
-// without AWS: provisioning, build start, polling, and artifact retrieval are all
-// in memory.
+// without AWS: provisioning, build start, polling, and artifact retrieval are
+// all in memory.
 type fakeBackend struct {
 	prov    Provisioned
 	provErr error
@@ -94,8 +94,9 @@ func (f *fakeBackend) FetchArtifact(_ context.Context, _, _ string) ([]byte, err
 	return f.artifact, nil
 }
 
-// newTestAttributor wires an Attributor with an instant sleep and a deterministic
-// artifact key so the poll loop runs without delay and assertions are stable.
+// newTestAttributor wires an Attributor with an instant sleep and a
+// deterministic artifact key so the poll loop runs without delay and assertions
+// are stable.
 func newTestAttributor(b Backend, out *bytes.Buffer) *Attributor {
 	a := NewWithWriter(b, out)
 	a.sleep = func(context.Context, time.Duration) error { return nil }
@@ -103,8 +104,8 @@ func newTestAttributor(b Backend, out *bytes.Buffer) *Attributor {
 	return a
 }
 
-// controllerWorkspace creates a workspace root holding git controller clones with
-// a go.mod each, and returns the root.
+// controllerWorkspace creates a workspace root holding git controller clones
+// with a go.mod each, and returns the root.
 func controllerWorkspace(t *testing.T, controllers ...string) string {
 	t.Helper()
 	root := t.TempDir()

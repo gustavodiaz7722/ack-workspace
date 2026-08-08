@@ -25,10 +25,10 @@ const (
 // upstream.
 //
 // release performs git operations, pushes to the fork, and opens a GitHub pull
-// request, so it declares the git, token, and identity prerequisites
-// (Requirements 1.1, 1.3, 1.5, 1.7). The empty-service and invalid-version cases
-// are enforced by the Controller_Releaser, which returns a *releaser.UsageError
-// so the rule lives in one place and maps to a usage exit code.
+// request, so it declares the git, token, and identity prerequisites. The
+// empty-service and invalid-version cases are enforced by the releaser, which
+// returns a *releaser.UsageError so the rule lives in one place and maps to a
+// usage exit code.
 func newReleaseCommand(d deps, res *Result) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "release <service> --version <version>",
@@ -56,9 +56,9 @@ func newReleaseCommand(d deps, res *Result) *cobra.Command {
 			skipPR, _ := cmd.Flags().GetBool(flagSkipPR)
 			prBody, _ := cmd.Flags().GetString(flagPRBody)
 
-			// A missing service identifier or version is validated by the
-			// Controller_Releaser (which returns a *releaser.UsageError) so the
-			// rule is enforced in a single place.
+			// A missing service identifier or version is validated by the releaser
+			// (which returns a *releaser.UsageError) so the rule is enforced in a single
+			// place.
 			var service string
 			if len(args) > 0 {
 				service = args[0]

@@ -1,13 +1,13 @@
 // Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
-// Licensed under the Apache License, Version 2.0 (the "License"). You may
-// not use this file except in compliance with the License. A copy of the
-// License is located at
+// Licensed under the Apache License, Version 2.0 (the "License"). You may not
+// use this file except in compliance with the License. A copy of the License is
+// located at
 //
 //     http://aws.amazon.com/apache2.0/
 //
-// or in the "license" file accompanying this file. This file is distributed
-// on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+// or in the "license" file accompanying this file. This file is distributed on
+// an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 // express or implied. See the License for the specific language governing
 // permissions and limitations under the License.
 
@@ -27,14 +27,14 @@ import (
 
 const (
 	// ClusterName is the one development cluster every deploy targets. It is
-	// deliberately fixed rather than configurable: a single well-known cluster
-	// per account is all local iteration needs, and pinning the name means every
+	// deliberately fixed rather than configurable: a single well-known cluster per
+	// account is all local iteration needs, and pinning the name means every
 	// deploy converges on the same bootstrapped state instead of quietly creating
 	// a second cluster after a typo.
 	ClusterName = "ack-dev-auto"
 
-	// SharedServiceAccount is the Kubernetes service account every controller on
-	// a bootstrapped cluster runs under.
+	// SharedServiceAccount is the Kubernetes service account every controller on a
+	// bootstrapped cluster runs under.
 	//
 	// EKS Pod Identity associations are keyed on (namespace, serviceAccountName)
 	// and do not support wildcards, so there is no way to grant credentials to a
@@ -94,8 +94,8 @@ type ClusterSpec struct {
 	// Version pins the Kubernetes version. When empty, eksctl's own default
 	// version is used, so this does not go stale as EKS releases new versions.
 	Version string
-	// Namespace is the namespace controllers are installed into, and the
-	// namespace half of the pod identity association key.
+	// Namespace is the namespace controllers are installed into, and the namespace
+	// half of the pod identity association key.
 	Namespace string
 	// ServiceAccount is the service account controllers run under, and the
 	// service-account half of the pod identity association key.
@@ -117,40 +117,38 @@ type PodIdentitySpec struct {
 	// Namespace and ServiceAccount form the association key.
 	Namespace      string
 	ServiceAccount string
-	// RoleName is the IAM role the association points at. It is reused when a
-	// role of that name already exists and created otherwise.
+	// RoleName is the IAM role the association points at. It is reused when a role
+	// of that name already exists and created otherwise.
 	RoleName string
 	// PolicyARNs are attached to the role when it has to be created.
 	PolicyARNs []string
 }
 
-// Provisioner manages the lifecycle of the development cluster a deploy targets:
-// checking whether it exists, creating it with EKS Auto Mode when it does not,
-// pointing the local kubeconfig at it, and making sure the controller's service
-// account exists and is bound to AWS credentials through an EKS Pod Identity
-// association. It is the seam through which the real eksctl/aws/kubectl
-// invocations are replaced in tests.
+// Provisioner manages the lifecycle of the development cluster a deploy
+// targets: checking whether it exists, creating it with EKS Auto Mode when it
+// does not, pointing the local kubeconfig at it, and making sure the
+// controller's service account exists and is bound to AWS credentials through
+// an EKS Pod Identity association. It is the seam through which the real
+// eksctl/aws/kubectl invocations are replaced in tests.
 type Provisioner interface {
-	// ClusterExists reports whether an EKS cluster named name exists in region.
-	// A failure to answer the question (rather than a definitive "no") is
-	// returned as an error, so an unrelated failure never provokes a cluster
-	// creation.
+	// ClusterExists reports whether an EKS cluster named name exists in region. A
+	// failure to answer the question (rather than a definitive "no") is returned
+	// as an error, so an unrelated failure never provokes a cluster creation.
 	ClusterExists(ctx context.Context, name, region string) (bool, error)
 	// CreateCluster creates the cluster described by spec, together with the pod
-	// identity association for its controller service account. It blocks until
-	// the cluster is ready, which typically takes 15-25 minutes.
+	// identity association for its controller service account. It blocks until the
+	// cluster is ready, which typically takes 15-25 minutes.
 	CreateCluster(ctx context.Context, spec ClusterSpec) error
 	// UpdateKubeconfig points the local kubeconfig (and therefore kubectl and
 	// helm) at the named cluster and makes it the current context.
 	UpdateKubeconfig(ctx context.Context, name, region string) error
 	// EnsureServiceAccount creates namespace and the named service account when
-	// they are absent. The controller chart is told not to create its own
-	// service account, so this owns it instead: one account, shared by every
-	// controller, matching the single pod identity association.
+	// they are absent. The controller chart is told not to create its own service
+	// account, so this owns it instead: one account, shared by every controller,
+	// matching the single pod identity association.
 	EnsureServiceAccount(ctx context.Context, namespace, name string) error
-	// EnsurePodIdentity ensures an association exists for spec's
-	// (namespace, service account), creating it when absent and reporting
-	// whether it did.
+	// EnsurePodIdentity ensures an association exists for spec's (namespace,
+	// service account), creating it when absent and reporting whether it did.
 	EnsurePodIdentity(ctx context.Context, spec PodIdentitySpec) (created bool, err error)
 }
 
@@ -159,9 +157,9 @@ type Provisioner interface {
 //
 // Auto Mode makes compute, VPC CNI networking, EBS block storage, load
 // balancing and CoreDNS built-in cluster capabilities rather than addons, so
-// there is no managedNodeGroups block and no addon list to maintain. The EKS Pod
-// Identity Agent is built in as well, which is why the eks-pod-identity-agent
-// addon must not be installed on such a cluster.
+// there is no managedNodeGroups block and no addon list to maintain. The EKS
+// Pod Identity Agent is built in as well, which is why the
+// eks-pod-identity-agent addon must not be installed on such a cluster.
 type eksctlClusterConfig struct {
 	APIVersion string           `yaml:"apiVersion"`
 	Kind       string           `yaml:"kind"`
@@ -195,9 +193,9 @@ type eksctlPodIdentityAssociation struct {
 }
 
 // PodIdentityRoleName returns the conventional name of the IAM role a
-// bootstrapped cluster binds its controller service account to. Deriving it from
-// the cluster and namespace keeps it unique per cluster, so two development
-// clusters do not contend for one role.
+// bootstrapped cluster binds its controller service account to. Deriving it
+// from the cluster and namespace keeps it unique per cluster, so two
+// development clusters do not contend for one role.
 func PodIdentityRoleName(cluster, namespace string) string {
 	return fmt.Sprintf("%s-%s-controller", cluster, namespace)
 }
@@ -205,9 +203,9 @@ func PodIdentityRoleName(cluster, namespace string) string {
 // renderClusterConfig marshals spec into an eksctl ClusterConfig document.
 //
 // The association sets createServiceAccount: false because the service account
-// is created separately (EnsureServiceAccount): a deploy onto an already-created
-// cluster has to be able to create it too, so owning it in one place keeps both
-// paths identical.
+// is created separately (EnsureServiceAccount): a deploy onto an
+// already-created cluster has to be able to create it too, so owning it in one
+// place keeps both paths identical.
 func renderClusterConfig(spec ClusterSpec) ([]byte, error) {
 	cfg := eksctlClusterConfig{
 		APIVersion: eksctlAPIVersion,
@@ -243,8 +241,8 @@ type execProvisioner struct{}
 
 // ClusterExists answers with `aws eks describe-cluster`. Only an explicit
 // not-found response counts as absent; any other failure is returned, because
-// mistaking a credential or network error for "absent" would start a
-// 15-25 minute cluster creation nobody asked for.
+// mistaking a credential or network error for "absent" would start a 15-25
+// minute cluster creation nobody asked for.
 func (execProvisioner) ClusterExists(ctx context.Context, name, region string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "aws", "eks", "describe-cluster",
 		"--name", name, "--region", region, "--query", "cluster.status", "--output", "text")
@@ -258,14 +256,14 @@ func (execProvisioner) ClusterExists(ctx context.Context, name, region string) (
 	return false, annotate(fmt.Sprintf("aws eks describe-cluster --name %s", name), out, err)
 }
 
-// CreateCluster renders spec into an eksctl configuration file and runs
-// `eksctl create cluster -f <file>`.
+// CreateCluster renders spec into an eksctl configuration file and runs `eksctl
+// create cluster -f <file>`.
 //
 // Unlike the other steps this one streams eksctl's output to stderr as it runs:
 // cluster creation takes 15-25 minutes, and a silent process for that long is
 // indistinguishable from a hung one. The configuration file is removed on
-// success and retained on failure, with its path named in the error, so a failed
-// creation can be inspected or retried with eksctl directly.
+// success and retained on failure, with its path named in the error, so a
+// failed creation can be inspected or retried with eksctl directly.
 func (execProvisioner) CreateCluster(ctx context.Context, spec ClusterSpec) error {
 	if err := requireTool("eksctl"); err != nil {
 		return err
@@ -295,10 +293,10 @@ func (execProvisioner) CreateCluster(ctx context.Context, spec ClusterSpec) erro
 }
 
 // UpdateKubeconfig runs `aws eks update-kubeconfig`, which writes the cluster's
-// entry into the local kubeconfig and selects it as the current context. It runs
-// on every deploy to a named cluster, not just after creation, so the deploy
-// targets the cluster the caller asked for regardless of which context happened
-// to be selected.
+// entry into the local kubeconfig and selects it as the current context. It
+// runs on every deploy to a named cluster, not just after creation, so the
+// deploy targets the cluster the caller asked for regardless of which context
+// happened to be selected.
 func (execProvisioner) UpdateKubeconfig(ctx context.Context, name, region string) error {
 	cmd := exec.CommandContext(ctx, "aws", "eks", "update-kubeconfig", "--name", name, "--region", region)
 	if out, err := runCombined(cmd); err != nil {
@@ -317,8 +315,8 @@ func (execProvisioner) EnsureServiceAccount(ctx context.Context, namespace, name
 	return ensureKubeObject(ctx, "serviceaccount", name, namespace)
 }
 
-// EnsurePodIdentity creates an association for (namespace, service account) when
-// one does not already exist.
+// EnsurePodIdentity creates an association for (namespace, service account)
+// when one does not already exist.
 //
 // When an IAM role of the configured name already exists (the usual case on a
 // cluster this tool bootstrapped) the association reuses it by ARN. Otherwise

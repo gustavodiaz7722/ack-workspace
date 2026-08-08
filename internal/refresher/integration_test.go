@@ -3,12 +3,12 @@
 
 // Package refresher_test contains end-to-end integration tests that drive the
 // real `git` binary against local repositories created in a temp dir. They
-// exercise the Workspace_Refresher (and the Workspace_Inspector) against genuine
-// git state rather than the MockRunner used by the unit tests.
+// exercise the refresher (and the inspector) against genuine git state rather
+// than the MockRunner used by the unit tests.
 //
-// These tests are guarded by the `integration` build tag so the default
-// `go test ./...` run stays fast and hermetic; run them with
-// `go test -tags integration ./...`. The GitHub merge-upstream call is mocked
+// These tests are guarded by the `integration` build tag so the default `go
+// test ./...` run stays fast and hermetic; run them with `go test -tags
+// integration ./...`. The GitHub merge-upstream call is mocked
 // (githubclient.NewMock) because there is no real GitHub here — the integration
 // validates the LOCAL git reconcile: tags fetched, working tree reset, main
 // checked out, and local main reset to exactly match upstream.
@@ -247,8 +247,8 @@ func TestRefreshResetsDivergedMain(t *testing.T) {
 	}
 }
 
-// TestInspectorReportsState exercises the Workspace_Inspector against the same
-// kind of real local repositories.
+// TestInspectorReportsState exercises the inspector against the same kind of
+// real local repositories.
 func TestInspectorReportsState(t *testing.T) {
 	requireGit(t)
 	base := t.TempDir()

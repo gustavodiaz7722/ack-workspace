@@ -1,11 +1,14 @@
-// Package prereq implements the Prerequisite_Checker, which verifies that
-// required external tools and credentials (git, GitHub token, GitHub identity)
-// are present before a command performs any side-effecting work.
+// Package prereq verifies that the git executable, a GitHub token, and a GitHub
+// identity -- whichever of the three a command declares -- are present before
+// it performs any side-effecting work.
+//
+// Only those three are modeled here. A command that also needs make, helm,
+// kubectl, eksctl, or AWS credentials reports a missing one as a failed Result
+// when it runs, not as a pre-flight error.
 //
 // Each command declares which prerequisites it needs via a Need value. The
 // Checker evaluates every requested prerequisite and aggregates all failures
-// into a single error so the user sees every missing item at once
-// (Requirement 1.7).
+// into a single error so the user sees every missing item at once.
 package prereq
 
 import (
@@ -19,24 +22,23 @@ import (
 // Need declares the prerequisites a command requires. A command sets the fields
 // that apply to it; the Checker evaluates only the requested prerequisites.
 type Need struct {
-	Git      bool // command performs git operations (Requirements 1.1, 1.2)
-	Token    bool // command performs GitHub API operations (Requirements 1.3, 1.4)
-	Identity bool // command requires GitHub_Identity (Requirements 1.5, 1.6)
+	Git      bool // command performs git operations
+	Token    bool // command performs GitHub API operations
+	Identity bool // command requires GitHub identity
 }
 
 // Checker verifies that the prerequisites declared by a Need are satisfied.
 type Checker interface {
 	// Check evaluates all requested needs and returns an error listing every
-	// missing prerequisite, or nil when all requested prerequisites are present
-	// (Requirement 1.7).
+	// missing prerequisite, or nil when all requested prerequisites are present.
 	Check(need Need, cfg config.Config) error
 }
 
 // MissingError reports one or more missing prerequisites. It lists every
-// missing item so the user can resolve them all at once (Requirement 1.7).
+// missing item so the user can resolve them all at once.
 type MissingError struct {
-	// Missing holds a human-readable instruction for each missing prerequisite,
-	// in evaluation order (git, token, identity).
+	// Missing holds a human-readable instruction for each missing prerequisite, in
+	// evaluation order (git, token, identity).
 	Missing []string
 }
 
@@ -51,8 +53,8 @@ func (e *MissingError) Error() string {
 // checker is the default Checker implementation. LookPath is injectable so
 // tests can stub git resolution without touching the real PATH.
 type checker struct {
-	// LookPath resolves an executable on the PATH. It defaults to
-	// exec.LookPath. Tests may stub it.
+	// LookPath resolves an executable on the PATH. It defaults to exec.LookPath.
+	// Tests may stub it.
 	LookPath func(file string) (string, error)
 }
 
@@ -70,7 +72,7 @@ func NewCheckerWithLookPath(lookPath func(file string) (string, error)) Checker 
 
 // Check evaluates every requested prerequisite and aggregates all failures into
 // a single *MissingError. It returns nil only when all requested prerequisites
-// are satisfied (Requirements 1.1-1.7).
+// are satisfied.
 func (c *checker) Check(need Need, cfg config.Config) error {
 	lookPath := c.LookPath
 	if lookPath == nil {
@@ -79,8 +81,7 @@ func (c *checker) Check(need Need, cfg config.Config) error {
 
 	var missing []string
 
-	// Git: a `git` executable must be resolvable on the PATH
-	// (Requirements 1.1, 1.2).
+	// Git: a `git` executable must be resolvable on the PATH.
 	if need.Git {
 		if _, err := lookPath("git"); err != nil {
 			missing = append(missing,
@@ -88,8 +89,7 @@ func (c *checker) Check(need Need, cfg config.Config) error {
 		}
 	}
 
-	// Token: a non-empty GitHub_Token must be available
-	// (Requirements 1.3, 1.4).
+	// Token: a non-empty GitHub token must be available.
 	if need.Token {
 		if strings.TrimSpace(cfg.Token) == "" {
 			missing = append(missing,
@@ -97,8 +97,7 @@ func (c *checker) Check(need Need, cfg config.Config) error {
 		}
 	}
 
-	// Identity: a non-empty GitHub_Identity must be configured
-	// (Requirements 1.5, 1.6).
+	// Identity: a non-empty GitHub identity must be configured.
 	if need.Identity {
 		if strings.TrimSpace(cfg.GitHubUser) == "" {
 			missing = append(missing,

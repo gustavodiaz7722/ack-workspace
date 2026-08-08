@@ -10,7 +10,8 @@ import (
 // TestExecRunner_GitVersion is a lightweight smoke test that the ExecRunner
 // actually shells out to the system git and returns its combined output. It is
 // skipped when git is not installed so the unit suite stays hermetic; the full
-// repository-level behavior is covered by the integration tests in a later task.
+// repository-level behavior is covered by the integration tests in a later
+// task.
 func TestExecRunner_GitVersion(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found on PATH; skipping ExecRunner smoke test")

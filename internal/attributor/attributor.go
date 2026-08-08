@@ -1,15 +1,15 @@
-// Package attributor implements the Controller_Attributor, which regenerates a
-// service controller's ATTRIBUTION.md by running the upstream `attribution-gen`
-// tool on ephemeral AWS CodeBuild compute and staging the result through S3.
+// Package attributor regenerates a service controller's ATTRIBUTION.md by
+// running the upstream `attribution-gen` tool on ephemeral AWS CodeBuild
+// compute and staging the result through S3.
 //
 // # Why the work runs remotely
 //
 // Generating an attribution document means walking the module dependency graph,
 // which requires fetching every dependency from the public Go module proxy.
-// From inside the Amazon corporate network those fetches are blocked, so running
-// `attribution-gen` locally fails. Ephemeral compute outside the corporate
-// network is therefore a hard requirement of this feature, not an optimization:
-// CodeBuild is where the generation has to happen.
+// From inside the Amazon corporate network those fetches are blocked, so
+// running `attribution-gen` locally fails. Ephemeral compute outside the
+// corporate network is therefore a hard requirement of this feature, not an
+// optimization: CodeBuild is where the generation has to happen.
 //
 // # How this differs from the scripts it replaces
 //
@@ -69,8 +69,8 @@ const (
 	// allToken expands to every managed controller repository under the workspace
 	// root. It is matched case-insensitively.
 	allToken = "all"
-	// UpstreamOwner is the GitHub organization hosting the canonical ACK repos.
-	// It is exported so the command layer can name it in help text.
+	// UpstreamOwner is the GitHub organization hosting the canonical ACK repos. It
+	// is exported so the command layer can name it in help text.
 	UpstreamOwner = "aws-controllers-k8s"
 	// attributionFileName is the checked-in document this feature regenerates.
 	// Note the singular spelling: it is an ACK convention that differs from
@@ -81,8 +81,8 @@ const (
 	// defaultPollInterval is how often a running build is polled.
 	defaultPollInterval = 10 * time.Second
 	// defaultTimeout bounds how long one build is waited on. Generation is
-	// normally a few minutes; the ceiling exists so a wedged build cannot hang
-	// the command forever.
+	// normally a few minutes; the ceiling exists so a wedged build cannot hang the
+	// command forever.
 	defaultTimeout = 20 * time.Minute
 )
 
@@ -101,9 +101,9 @@ func (e *UsageError) Error() string { return e.Msg }
 
 // Options are the resolved inputs for one attribution run.
 type Options struct {
-	// Ref is the git ref to generate from. When empty, each controller's
-	// currently checked-out branch is used, which matches how `build` and
-	// `deploy` operate on local state.
+	// Ref is the git ref to generate from. When empty, each controller's currently
+	// checked-out branch is used, which matches how `build` and `deploy` operate
+	// on local state.
 	Ref string
 	// RepoURL overrides the repository the build clones. When empty it is derived
 	// from the contributor's fork (or the upstream org when Upstream is set).
@@ -123,7 +123,7 @@ type Options struct {
 	Timeout      time.Duration
 }
 
-// Attributor implements the Controller_Attributor.
+// Attributor regenerates a controller's ATTRIBUTION.md.
 type Attributor struct {
 	backend Backend
 	out     io.Writer
@@ -150,8 +150,8 @@ func NewWithWriter(b Backend, out io.Writer) *Attributor {
 	}
 }
 
-// Generate regenerates ATTRIBUTION.md for each identified controller and returns
-// a Summary recording every target in exactly one of the generated
+// Generate regenerates ATTRIBUTION.md for each identified controller and
+// returns a Summary recording every target in exactly one of the generated
 // (OutcomeCreated), skipped, or failed buckets.
 //
 // The special "all" identifier expands to every managed controller under the
@@ -167,7 +167,7 @@ func (a *Attributor) Generate(ctx context.Context, ap app.App, identifiers []str
 		return workspace.Summary{}, &UsageError{Msg: "at least one service identifier (or 'all') is required"}
 	}
 
-	names, err := a.resolve(ap, identifiers)
+	names, err := a.expand(ap, identifiers)
 	if err != nil {
 		return workspace.Summary{}, err
 	}
@@ -231,10 +231,10 @@ func (a *Attributor) Generate(ctx context.Context, ap app.App, identifiers []str
 	return workspace.Summary{Results: results}, nil
 }
 
-// resolve turns the supplied identifiers into concrete controller repository
+// expand turns the supplied identifiers into concrete controller repository
 // names. "all" supersedes the rest and expands to the controllers discovered
 // under the workspace root.
-func (a *Attributor) resolve(ap app.App, identifiers []string) ([]string, error) {
+func (a *Attributor) expand(ap app.App, identifiers []string) ([]string, error) {
 	for _, id := range identifiers {
 		if strings.EqualFold(strings.TrimSpace(id), allToken) {
 			return discoverControllers(ap)
@@ -246,8 +246,8 @@ func (a *Attributor) resolve(ap app.App, identifiers []string) ([]string, error)
 	for _, id := range identifiers {
 		alias := strings.TrimSuffix(strings.TrimSpace(id), controllerSuffix)
 		if alias == "" {
-			// Keep the invalid token so it is reported as a failed Result rather
-			// than silently dropped.
+			// Keep the invalid token so it is reported as a failed Result rather than
+			// silently dropped.
 			names = append(names, strings.TrimSpace(id))
 			continue
 		}
@@ -334,9 +334,10 @@ func resolveRepoURL(ap app.App, name string, opts Options) (string, error) {
 	return fmt.Sprintf("https://github.com/%s/%s%s", ap.Config.GitHubUser, ap.Config.RepoPrefix, name), nil
 }
 
-// resolveRef determines the git ref to generate from: the explicit --ref, or the
-// controller's currently checked-out branch. A detached HEAD cannot be named
-// remotely, so it is reported as an actionable error rather than guessed at.
+// resolveRef determines the git ref to generate from: the explicit --ref, or
+// the controller's currently checked-out branch. A detached HEAD cannot be
+// named remotely, so it is reported as an actionable error rather than guessed
+// at.
 func (a *Attributor) resolveRef(ctx context.Context, ap app.App, path string, opts Options) (string, error) {
 	if ref := strings.TrimSpace(opts.Ref); ref != "" {
 		return normalizeRef(ref), nil
@@ -360,13 +361,12 @@ func normalizeRef(ref string) string {
 	return ref
 }
 
-// verifyRefIsPushed checks that the resolved ref is visible on the remote before
-// compute is started.
+// verifyRefIsPushed checks that the resolved ref is visible on the remote
+// before compute is started.
 //
-// This is the failure the superseded scripts handled worst: a local branch that
-// had not been pushed produced an opaque CodeBuild source failure minutes later.
-// A commit id is exempt because ls-remote does not advertise arbitrary commits;
-// for those the build itself is the only check.
+// An unpushed branch would otherwise surface as an opaque CodeBuild source
+// failure minutes later. A commit id is exempt because ls-remote does not
+// advertise arbitrary commits; for those the build itself is the only check.
 func verifyRefIsPushed(ctx context.Context, ap app.App, p plan) error {
 	if shaPattern.MatchString(p.ref) {
 		return nil
@@ -459,8 +459,8 @@ func (a *Attributor) destination(p plan, opts Options, single bool) string {
 	return filepath.Join(p.path, attributionFileName)
 }
 
-// wait polls the build until it reaches a terminal state, the deadline passes, or
-// the context is cancelled.
+// wait polls the build until it reaches a terminal state, the deadline passes,
+// or the context is cancelled.
 func (a *Attributor) wait(ctx context.Context, buildID string, opts Options) (BuildStatus, error) {
 	interval := opts.PollInterval
 	if interval <= 0 {
@@ -499,7 +499,8 @@ func buildFailure(status BuildStatus) error {
 }
 
 // reportProvisioning notes any AWS resource that had to be created, so the user
-// is told what this command added to their account rather than finding out later.
+// is told what this command added to their account rather than finding out
+// later.
 func (a *Attributor) reportProvisioning(prov Provisioned) {
 	if a.out == nil || !prov.Created() {
 		return
@@ -520,9 +521,9 @@ func (a *Attributor) reportProvisioning(prov Provisioned) {
 }
 
 // writeIfChanged writes data to path only when it differs from the current
-// contents, reporting whether it wrote. The write goes to a temporary file in the
-// destination directory and is then renamed, so an interrupted run can never
-// leave a half-written ATTRIBUTION.md in the repository.
+// contents, reporting whether it wrote. The write goes to a temporary file in
+// the destination directory and is then renamed, so an interrupted run can
+// never leave a half-written ATTRIBUTION.md in the repository.
 func writeIfChanged(path string, data []byte) (bool, error) {
 	if existing, err := os.ReadFile(path); err == nil && string(existing) == string(data) {
 		return false, nil
@@ -561,8 +562,8 @@ func randomKey(name string) string {
 	var buf [8]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		// A failure of the system CSPRNG is not recoverable here, but it also does
-		// not need to be fatal: the timestamp alone is enough to avoid a collision
-		// in practice for a human-driven command.
+		// not need to be fatal: the timestamp alone is enough to avoid a collision in
+		// practice for a human-driven command.
 		return fmt.Sprintf("attribution/%s/%d.md", name, time.Now().UnixNano())
 	}
 	return fmt.Sprintf("attribution/%s/%s.md", name, hex.EncodeToString(buf[:]))

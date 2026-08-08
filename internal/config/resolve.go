@@ -12,9 +12,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Flag key names. These are the stable identifiers the CLI layer (Task 13.1)
-// MUST use when populating Source.Flags. A key is present in the map only when
-// the user explicitly set the corresponding flag.
+// Flag key names. These are the stable identifiers the CLI layer MUST use when
+// populating Source.Flags. A key is present in the map only when the user
+// explicitly set the corresponding flag.
 const (
 	FlagGitHubUser    = "github-user"
 	FlagWorkspaceRoot = "workspace-root"
@@ -24,29 +24,29 @@ const (
 )
 
 // Environment variable key names. These are the stable identifiers the CLI
-// layer (Task 13.1) MUST use when populating Source.Env. Only configuration
-// values that define an environment variable appear here: the GitHub identity
-// and the GitHub token (Requirements 2.4, 2.5, 2.7).
+// layer MUST use when populating Source.Env. Only configuration values that
+// define an environment variable appear here: the GitHub identity and the
+// GitHub token.
 const (
 	EnvGitHubUser = "GITHUB_USER"
 	EnvToken      = "GITHUB_TOKEN"
 )
 
 // Default values applied when neither a flag, environment variable, nor
-// persisted value supplies a configuration value (Requirements 2.2, 2.3).
+// persisted value supplies a configuration value.
 const (
-	// DefaultRepoPrefix is the default Repository_Prefix (Requirement 2.3).
+	// DefaultRepoPrefix is the default fork name prefix.
 	DefaultRepoPrefix = "ack-"
-	// DefaultConcurrency is the default maximum concurrency (Requirement 7.1).
+	// DefaultConcurrency is the default maximum concurrency.
 	DefaultConcurrency = 4
 )
 
 // upstreamOrgPath is the GitHub organization path appended to $GOPATH/src when
-// computing the default Workspace_Root (Requirement 2.2).
+// computing the default workspace root.
 const upstreamOrgPath = "src/github.com/aws-controllers-k8s"
 
 // ParseError indicates the persisted configuration file exists but could not be
-// read or parsed. It always names the configuration file path (Requirement 2.6).
+// read or parsed. It always names the configuration file path.
 type ParseError struct {
 	Path string
 	Err  error
@@ -59,9 +59,8 @@ func (e *ParseError) Error() string {
 func (e *ParseError) Unwrap() error { return e.Err }
 
 // MissingGitHubUserError indicates the configuration file does not exist and no
-// GitHub_Identity was supplied through a flag or environment variable. The
-// GitHub_Identity is the only required value that has no default
-// (Requirement 2.7).
+// GitHub identity was supplied through a flag or environment variable. The
+// GitHub identity is the only required value that has no default.
 type MissingGitHubUserError struct {
 	// Path is the configuration file path the user should create.
 	Path string
@@ -77,13 +76,13 @@ func (e *MissingGitHubUserError) Error() string {
 // Resolve applies per-value precedence, highest first: command-line flag value,
 // then environment variable value (where one is defined for that value), then
 // the persisted file value, then the default value. The selected value applies
-// only for this invocation (Requirement 2.4).
+// only for this invocation.
 //
 // The persisted TOML file at Path() is read when present. A missing file is
 // acceptable. If the file exists but cannot be parsed, a *ParseError naming the
-// path is returned (Requirement 2.6). If the file is absent and no GitHub
-// identity is supplied by flag or environment variable, a
-// *MissingGitHubUserError is returned (Requirement 2.7).
+// path is returned. If the file is absent and no GitHub identity is supplied by
+// flag or environment variable, a
+// *MissingGitHubUserError is returned.
 func (m *manager) Resolve(src Source) (Config, error) {
 	persisted, fileExists, err := m.loadFile()
 	if err != nil {
@@ -92,7 +91,7 @@ func (m *manager) Resolve(src Source) (Config, error) {
 
 	var cfg Config
 
-	// GitHubUser: flag > env > persisted. No default (Requirement 2.7).
+	// GitHubUser: flag > env > persisted. No default.
 	if v, ok := lookup(src.Flags, FlagGitHubUser); ok {
 		cfg.GitHubUser = v
 	} else if v, ok := lookup(src.Env, EnvGitHubUser); ok {
@@ -102,7 +101,7 @@ func (m *manager) Resolve(src Source) (Config, error) {
 	}
 
 	// WorkspaceRoot: flag > persisted > default, expanded to an absolute path
-	// (Requirement 2.2). No environment variable is defined for this value.
+	//. No environment variable is defined for this value.
 	workspaceRoot := ""
 	if v, ok := lookup(src.Flags, FlagWorkspaceRoot); ok {
 		workspaceRoot = v
@@ -118,8 +117,8 @@ func (m *manager) Resolve(src Source) (Config, error) {
 	}
 	cfg.WorkspaceRoot = abs
 
-	// RepoPrefix: flag > persisted > default (Requirement 2.3). No environment
-	// variable is defined for this value.
+	// RepoPrefix: flag > persisted > default. No environment variable is defined
+	// for this value.
 	if v, ok := lookup(src.Flags, FlagRepoPrefix); ok {
 		cfg.RepoPrefix = v
 	} else if persisted.RepoPrefix != "" {
@@ -128,10 +127,10 @@ func (m *manager) Resolve(src Source) (Config, error) {
 		cfg.RepoPrefix = DefaultRepoPrefix
 	}
 
-	// Concurrency: flag > persisted > default (Requirements 2.4, 7.1). No
-	// environment variable is defined for this value. Range validation (1..32,
-	// Requirement 7.3) is performed by the concurrency-handling component, not
-	// here.
+	// Concurrency: flag > persisted > default. No environment variable is defined
+	// for this value. The 1..32 range is enforced by the command layer
+	// (cmd.validateConcurrency), which rejects an out-of-range value before any
+	// work starts; resolution only decides which value wins.
 	cfg.Concurrency = DefaultConcurrency
 	if persisted.Concurrency != 0 {
 		cfg.Concurrency = persisted.Concurrency
@@ -144,7 +143,7 @@ func (m *manager) Resolve(src Source) (Config, error) {
 		cfg.Concurrency = n
 	}
 
-	// Token: flag > env. Never persisted (Requirement 2.5).
+	// Token: flag > env. Never persisted.
 	if v, ok := lookup(src.Flags, FlagToken); ok {
 		cfg.Token = v
 	} else if v, ok := lookup(src.Env, EnvToken); ok {
@@ -153,8 +152,7 @@ func (m *manager) Resolve(src Source) (Config, error) {
 
 	// The configuration file is the only source of a persisted GitHub identity.
 	// When it is absent and no identity was supplied by flag or environment
-	// variable, the only required-without-default value is missing
-	// (Requirement 2.7).
+	// variable, the only required-without-default value is missing.
 	if !fileExists && cfg.GitHubUser == "" {
 		return Config{}, &MissingGitHubUserError{Path: m.Path()}
 	}
@@ -164,7 +162,7 @@ func (m *manager) Resolve(src Source) (Config, error) {
 
 // loadFile reads the persisted configuration file. It reports whether the file
 // exists. A missing file is not an error. A file that exists but cannot be read
-// or parsed yields a *ParseError naming the path (Requirement 2.6).
+// or parsed yields a *ParseError naming the path.
 func (m *manager) loadFile() (fileConfig, bool, error) {
 	path := m.Path()
 	if _, err := os.Stat(path); err != nil {
@@ -182,8 +180,7 @@ func (m *manager) loadFile() (fileConfig, bool, error) {
 }
 
 // defaultWorkspaceRoot computes $GOPATH/src/github.com/aws-controllers-k8s,
-// resolving $GOPATH via `go env GOPATH` and falling back to $HOME/go
-// (Requirement 2.2).
+// resolving $GOPATH via `go env GOPATH` and falling back to $HOME/go.
 func (m *manager) defaultWorkspaceRoot() string {
 	return filepath.Join(m.gopath(), filepath.FromSlash(upstreamOrgPath))
 }
@@ -201,7 +198,7 @@ func (m *manager) gopath() string {
 
 // lookup returns the value for key and whether the key was present. Presence
 // distinguishes an explicitly set (possibly empty) value from an unset one,
-// which keeps the precedence rules exact (Requirement 2.4).
+// which keeps the precedence rules exact.
 func lookup(m map[string]string, key string) (string, bool) {
 	if m == nil {
 		return "", false

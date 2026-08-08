@@ -138,8 +138,8 @@ func TestAdapterCreateForkSuccess(t *testing.T) {
 	rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/forks"):
-			// The fork must be created with default_branch_only so no upstream
-			// branches or tags are copied into the fork.
+			// The fork must be created with default_branch_only so no upstream branches
+			// or tags are copied into the fork.
 			var body struct {
 				Name              string `json:"name"`
 				DefaultBranchOnly bool   `json:"default_branch_only"`
@@ -257,8 +257,8 @@ func TestAdapterListOrgRepos(t *testing.T) {
 
 		switch page {
 		case 1:
-			// First page links to a next page; includes one archived repo that
-			// must be filtered out.
+			// First page links to a next page; includes one archived repo that must be
+			// filtered out.
 			h := http.Header{}
 			h.Set("Link", `<https://api.github.com/organizations/1/repos?page=2>; rel="next"`)
 			return jsonRespWithHeader(http.StatusOK, `[

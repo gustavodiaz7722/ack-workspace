@@ -2,8 +2,8 @@ package attributor
 
 // This file is the only place in the package that imports the AWS SDK. Keeping
 // the SDK behind the Backend interface is what lets the component's flow
-// (provisioning reporting, polling, artifact validation, atomic file writing) be
-// unit-tested with an in-memory fake and no credentials.
+// (provisioning reporting, polling, artifact validation, atomic file writing)
+// be unit-tested with an in-memory fake and no credentials.
 
 import (
 	"context"
@@ -57,8 +57,8 @@ type codeBuildBackend struct {
 }
 
 // NewCodeBuildBackend builds the production Backend using the default AWS
-// credential chain. region overrides the region resolved from the environment or
-// shared config. It resolves the caller's account and partition eagerly so a
+// credential chain. region overrides the region resolved from the environment
+// or shared config. It resolves the caller's account and partition eagerly so a
 // credential problem surfaces here, before any resource is created.
 func NewCodeBuildBackend(ctx context.Context, region string) (Backend, error) {
 	opts := []func(*awsconfig.LoadOptions) error{}
@@ -89,9 +89,9 @@ func NewCodeBuildBackend(ctx context.Context, region string) (Backend, error) {
 }
 
 // EnsureInfrastructure provisions the role, bucket, and project in that order:
-// the project needs the role's ARN, and the role's policy needs the bucket name,
-// so the bucket name is resolved first. Every step is idempotent and nothing is
-// ever deleted.
+// the project needs the role's ARN, and the role's policy needs the bucket
+// name, so the bucket name is resolved first. Every step is idempotent and
+// nothing is ever deleted.
 func (b *codeBuildBackend) EnsureInfrastructure(ctx context.Context, in Infrastructure) (Provisioned, error) {
 	in = in.withDefaults()
 	if in.Bucket == "" {
@@ -123,8 +123,9 @@ func (b *codeBuildBackend) EnsureInfrastructure(ctx context.Context, in Infrastr
 	return prov, nil
 }
 
-// ensureRole creates the build role when absent and (always) rewrites its inline
-// policy so a changed bucket or project name is reflected without manual repair.
+// ensureRole creates the build role when absent and (always) rewrites its
+// inline policy so a changed bucket or project name is reflected without manual
+// repair.
 func (b *codeBuildBackend) ensureRole(ctx context.Context, in Infrastructure) (arn string, created bool, err error) {
 	out, err := b.iam.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(in.Role)})
 	switch {
@@ -157,9 +158,9 @@ func (b *codeBuildBackend) ensureRole(ctx context.Context, in Infrastructure) (a
 }
 
 // ensureBucket creates the artifact bucket when absent, with public access
-// blocked. The bucket holds documents derived from public repositories, but it is
-// created private because it lives in the user's account and there is no reason
-// for it to be reachable.
+// blocked. The bucket holds documents derived from public repositories, but it
+// is created private because it lives in the user's account and there is no
+// reason for it to be reachable.
 func (b *codeBuildBackend) ensureBucket(ctx context.Context, bucket string) (bool, error) {
 	if _, err := b.s3.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucket)}); err == nil {
 		return false, nil
@@ -173,8 +174,8 @@ func (b *codeBuildBackend) ensureBucket(ctx context.Context, bucket string) (boo
 		}
 	}
 	if _, err := b.s3.CreateBucket(ctx, input); err != nil {
-		// A concurrent run (or a pre-existing bucket HeadBucket could not see) is
-		// not an error: the bucket exists and is ours.
+		// A concurrent run (or a pre-existing bucket HeadBucket could not see) is not
+		// an error: the bucket exists and is ours.
 		var owned *s3types.BucketAlreadyOwnedByYou
 		var exists *s3types.BucketAlreadyExists
 		if errors.As(err, &owned) || errors.As(err, &exists) {
@@ -197,14 +198,13 @@ func (b *codeBuildBackend) ensureBucket(ctx context.Context, bucket string) (boo
 	return true, nil
 }
 
-// ensureProject creates the CodeBuild project when absent, or updates an existing
-// one so its buildspec, image, and role match what this version of the tool
-// expects.
+// ensureProject creates the CodeBuild project when absent, or updates an
+// existing one so its buildspec, image, and role match what this version of the
+// tool expects.
 //
 // The project is generic: its source type is NO_SOURCE and the buildspec clones
-// whichever repository a build names through environment overrides. That is why
-// it never needs to be mutated per run, unlike the shared project the superseded
-// bootstrap script rewrote for every repository.
+// whichever repository a build names through environment overrides, so it never
+// needs to be mutated per run.
 func (b *codeBuildBackend) ensureProject(ctx context.Context, in Infrastructure, roleARN string, roleIsNew bool) (created, updated bool, err error) {
 	source := &cbtypes.ProjectSource{
 		Type:      cbtypes.SourceTypeNoSource,
@@ -253,8 +253,8 @@ func (b *codeBuildBackend) ensureProject(ctx context.Context, in Infrastructure,
 
 	if err := create(); err != nil {
 		// A role created moments ago may not be assumable yet, which CodeBuild
-		// reports as an invalid-input error naming the service role. Retry only
-		// that case, and only when we just created the role.
+		// reports as an invalid-input error naming the service role. Retry only that
+		// case, and only when we just created the role.
 		if !roleIsNew || !isRolePropagationError(err) {
 			return false, false, fmt.Errorf("creating CodeBuild project %s: %w", in.Project, err)
 		}
@@ -324,9 +324,8 @@ func (b *codeBuildBackend) Status(ctx context.Context, buildID string) (BuildSta
 	return status, nil
 }
 
-// FetchArtifact downloads the staged document from S3. This replaces the
-// superseded approach of reassembling the file from CloudWatch log events, so the
-// bytes written locally are exactly the bytes the generator produced.
+// FetchArtifact downloads the staged document from S3, so the bytes written
+// locally are exactly the bytes the generator produced.
 func (b *codeBuildBackend) FetchArtifact(ctx context.Context, bucket, key string) ([]byte, error) {
 	out, err := b.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
@@ -366,8 +365,8 @@ func isRolePropagationError(err error) bool {
 }
 
 // partitionOf extracts the ARN partition from the caller's identity ARN,
-// defaulting to the commercial partition when it cannot be determined, so policy
-// ARNs are correct in China and GovCloud regions too.
+// defaulting to the commercial partition when it cannot be determined, so
+// policy ARNs are correct in China and GovCloud regions too.
 func partitionOf(arn string) string {
 	parts := strings.SplitN(arn, ":", 3)
 	if len(parts) >= 2 && parts[0] == "arn" && parts[1] != "" {

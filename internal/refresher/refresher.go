@@ -21,33 +21,29 @@ const (
 	// defaultBranch is the branch the refresher checks out and reconciles. ACK
 	// repositories use "main" as their default branch.
 	defaultBranch = "main"
+	// upstreamRef is the remote-tracking ref the local default branch is reset to
+	// match.
+	upstreamRef = upstreamRemote + "/" + defaultBranch
 )
 
-// upstreamRef is the remote-tracking ref for the upstream default branch that
-// the local default branch is reset to match.
-func upstreamRef() string {
-	return upstreamRemote + "/" + defaultBranch
-}
-
-// Refresher implements the Workspace_Refresher. It reconciles each
-// Managed_Repository to a clean, up-to-date default branch ready for
-// development.
+// Refresher reconciles each managed repository to a clean, up-to-date default
+// branch ready for development.
 type Refresher struct{}
 
 // New returns a ready-to-use Refresher.
 func New() *Refresher { return &Refresher{} }
 
-// Refresh reconciles each Managed_Repository under the Workspace_Root to the
+// Refresh reconciles each managed repository under the workspace root to the
 // development baseline: fork synced with upstream, all upstream tags present
 // locally, the default branch checked out, and the local default branch reset
 // to match upstream.
 //
 // When only is non-empty, processing is restricted to that subset; any name in
-// only that is not a Managed_Repository is recorded as a failed Result, and the
-// valid repositories are still processed. The returned error is non-nil only for
-// a pre-flight failure to discover the workspace; all per-repository problems are
-// captured as failed Results so the batch continues. The returned Summary is
-// sorted by repository name for stable output.
+// only that is not a managed repository is recorded as a failed Result, and the
+// valid repositories are still processed. The returned error is non-nil only
+// for a pre-flight failure to discover the workspace; all per-repository
+// problems are captured as failed Results so the batch continues. The returned
+// Summary is sorted by repository name for stable output.
 func (r *Refresher) Refresh(ctx context.Context, a app.App, only []string) (workspace.Summary, error) {
 	root := a.Config.WorkspaceRoot
 
@@ -106,32 +102,19 @@ func selectRepos(discovered, only []string) (toProcess, invalid []string) {
 	return toProcess, invalid
 }
 
-// process reconciles a single repository to the development baseline and returns
-// its terminal Result. It never returns an error out-of-band: every failure is
-// captured into a failed Result so the engine continues with the other
-// repositories.
+// process reconciles a single repository to the development baseline and
+// returns its terminal Result. It never returns an error out-of-band: every
+// failure is captured into a failed Result so the engine continues with the
+// other repositories.
 //
-// The steps are ordered so the remote, non-destructive work happens first and a
-// problem there aborts before any local state is discarded:
-//
-//  1. SyncFork brings the fork's default branch current with upstream
-//     server-side. A fork that has diverged from upstream cannot be synced and
-//     is reported as failed before anything local is touched.
-//  2. FetchWithTags downloads upstream commits and every upstream tag.
-//  3. ResetHard + Clean discard local modifications and untracked files so the
-//     branch switch cannot be blocked.
-//  4. Checkout switches to the default branch.
-//  5. ResetHardTo forces the local default branch to exactly match upstream
-//     (and therefore the freshly synced fork).
-//  6. Fetch origin updates the fork's remote-tracking ref (origin/main) so it
-//     reflects the server-side sync from step 1. Without this the local
-//     origin/main ref stays stale and `git status` misreports the branch as
-//     ahead of the fork even though both point at the same commit.
+// The steps below are ordered so the remote, non-destructive work happens
+// first: a fork that has diverged from upstream cannot be synced, and has to be
+// reported as failed before any local state is discarded.
 func (r *Refresher) process(ctx context.Context, a app.App, path, name string) workspace.Result {
 	repo := git.NewRepo(path, a.Git)
 
-	// The fork is named "<prefix><upstream-name>" under the contributor's
-	// account; the discovered directory name is the upstream name.
+	// The fork is named "<prefix><upstream-name>" under the contributor's account;
+	// the discovered directory name is the upstream name.
 	fork := githubclient.RepoRef{Owner: a.Config.GitHubUser, Name: a.Config.RepoPrefix + name}
 
 	// Dry-run: report the action that would be taken using no mutating GitHub or
@@ -142,7 +125,7 @@ func (r *Refresher) process(ctx context.Context, a app.App, path, name string) w
 			Outcome: workspace.OutcomeCreated,
 			Reason: fmt.Sprintf(
 				"would sync fork %s from upstream, fetch tags, discard local changes, reset %s to %s, and fetch %s",
-				fork, defaultBranch, upstreamRef(), originRemote),
+				fork, defaultBranch, upstreamRef, originRemote),
 		}
 	}
 
@@ -151,7 +134,7 @@ func (r *Refresher) process(ctx context.Context, a app.App, path, name string) w
 	if err := a.GitHub.SyncFork(ctx, fork, defaultBranch); err != nil {
 		return failed(name, fmt.Errorf("syncing fork from upstream: %w", err))
 	}
-	// 2. Fetch upstream commits and all tags into the local copy.
+	// 2. Upstream commits and every upstream tag.
 	if err := repo.FetchWithTags(ctx, upstreamRemote); err != nil {
 		return failed(name, fmt.Errorf("fetching %s with tags: %w", upstreamRemote, err))
 	}
@@ -163,17 +146,17 @@ func (r *Refresher) process(ctx context.Context, a app.App, path, name string) w
 	if err := repo.Clean(ctx); err != nil {
 		return failed(name, fmt.Errorf("removing untracked files: %w", err))
 	}
-	// 4. Switch to the default branch now that the working tree is pristine.
+	// 4. Safe now that the working tree is pristine.
 	if err := repo.Checkout(ctx, defaultBranch); err != nil {
 		return failed(name, fmt.Errorf("switching to %s: %w", defaultBranch, err))
 	}
 	// 5. Force the local default branch to exactly match upstream (== fork).
-	if err := repo.ResetHardTo(ctx, upstreamRef()); err != nil {
-		return failed(name, fmt.Errorf("resetting %s to %s: %w", defaultBranch, upstreamRef(), err))
+	if err := repo.ResetHardTo(ctx, upstreamRef); err != nil {
+		return failed(name, fmt.Errorf("resetting %s to %s: %w", defaultBranch, upstreamRef, err))
 	}
-	// 6. Update the fork's remote-tracking ref (origin/main) to reflect the
-	// server-side sync from step 1, so `git status` reports the local default
-	// branch as in sync with the fork rather than ahead of a stale ref.
+	// 6. Update origin/main to reflect the server-side sync from step 1. Without
+	// this the remote-tracking ref stays stale and `git status` misreports the
+	// branch as ahead of the fork even though both point at the same commit.
 	if err := repo.Fetch(ctx, originRemote); err != nil {
 		return failed(name, fmt.Errorf("fetching %s: %w", originRemote, err))
 	}

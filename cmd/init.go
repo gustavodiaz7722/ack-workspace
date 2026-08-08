@@ -7,13 +7,13 @@ import (
 )
 
 // newInitCommand builds the `init` subcommand, which bootstraps a contributor
-// workspace by forking, cloning, and configuring the core Common_Repositories.
+// workspace by forking, cloning, and configuring the core repositories.
 //
 // init performs both git operations and GitHub API operations and needs the
 // contributor's identity to name the forks, so it declares all three
-// prerequisites (Requirements 1.1, 1.3, 1.5): the prerequisite Check runs before
-// the Workspace_Initializer touches GitHub or the filesystem, and an aggregated
-// error names every missing prerequisite at once (Requirement 1.7).
+// prerequisites: the prerequisite Check runs before the initializer touches
+// GitHub or the filesystem, and an aggregated error names every missing
+// prerequisite at once.
 func newInitCommand(d deps, res *Result) *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",

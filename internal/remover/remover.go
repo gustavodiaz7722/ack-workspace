@@ -1,6 +1,5 @@
-// Package remover implements the Controller_Remover, the inverse of the
-// Controller_Adder: it tears down a service controller workspace entry by
-// deleting its local clone and its GitHub fork.
+// Package remover is the inverse of the adder: it tears down a service
+// controller's workspace entry by deleting its local clone and its GitHub fork.
 //
 // This is a destructive, irreversible operation (a deleted fork cannot be
 // recovered), so the component is deliberately conservative:
@@ -12,8 +11,8 @@
 //     the caller forces removal, so local work is not silently destroyed.
 //   - In dry-run mode it reports what it would delete and touches nothing.
 //
-// Confirmation of the destructive intent is the responsibility of the CLI layer;
-// by the time Remove is called the user has already opted in (or passed
+// Confirmation of the destructive intent is the responsibility of the CLI
+// layer; by the time Remove is called the user has already opted in (or passed
 // --dry-run).
 package remover
 
@@ -36,9 +35,9 @@ import (
 // ACK repositories. The remover refuses to delete anything owned by it.
 const upstreamOwner = "aws-controllers-k8s"
 
-// controllerSuffix is the conventional suffix of every Service_Controller_Repository
-// name. A bare Service_Alias ("s3") and its full form ("s3-controller") both
-// normalize to the same repository.
+// controllerSuffix is the conventional suffix of every service controller
+// repository name. A bare service alias ("s3") and its full form
+// ("s3-controller") both normalize to the same repository.
 const controllerSuffix = "-controller"
 
 // allToken is the special identifier that expands to every managed controller
@@ -53,23 +52,23 @@ func (e *UsageError) Error() string { return e.Msg }
 
 // Options controls removal behavior.
 type Options struct {
-	// KeepFork, when true, deletes only the local clone and leaves the GitHub
-	// fork intact.
+	// KeepFork, when true, deletes only the local clone and leaves the GitHub fork
+	// intact.
 	KeepFork bool
 	// Force, when true, removes a repository even if its working tree has
 	// uncommitted changes. Without it, a dirty repository is skipped.
 	Force bool
 }
 
-// Remover implements the Controller_Remover.
+// Remover deletes a controller's local clone and its GitHub fork.
 type Remover struct{}
 
 // New returns a ready-to-use Remover.
 func New() *Remover { return &Remover{} }
 
 // Remove deletes the local clone and GitHub fork of each identified controller,
-// returning a Summary in which every processed target is recorded in exactly one
-// of the removed (OutcomeCreated), skipped, or failed buckets.
+// returning a Summary in which every processed target is recorded in exactly
+// one of the removed (OutcomeCreated), skipped, or failed buckets.
 //
 // The special "all" identifier expands to every managed controller repository
 // discovered under the workspace root; it supersedes any other identifiers. An
@@ -94,7 +93,7 @@ func (r *Remover) Remove(ctx context.Context, ap app.App, identifiers []string, 
 			"refusing to operate: the configured GitHub identity %q is the upstream organization", ap.Config.GitHubUser)}
 	}
 
-	names, err := r.resolve(ap, identifiers)
+	names, err := r.expand(ap, identifiers)
 	if err != nil {
 		return workspace.Summary{}, err
 	}
@@ -111,14 +110,14 @@ func (r *Remover) Remove(ctx context.Context, ap app.App, identifiers []string, 
 	return workspace.Summary{Results: results}, nil
 }
 
-// resolve turns the supplied identifiers into the concrete set of upstream
+// expand turns the supplied identifiers into the concrete set of upstream
 // controller names ("<alias>-controller") to remove. When "all" is present it
 // supersedes the rest and expands to the managed controllers discovered under
 // the workspace root.
-func (r *Remover) resolve(ap app.App, identifiers []string) ([]string, error) {
+func (r *Remover) expand(ap app.App, identifiers []string) ([]string, error) {
 	for _, id := range identifiers {
 		if strings.EqualFold(strings.TrimSpace(id), allToken) {
-			return r.discoverControllers(ap)
+			return discoverControllers(ap)
 		}
 	}
 
@@ -127,8 +126,8 @@ func (r *Remover) resolve(ap app.App, identifiers []string) ([]string, error) {
 	for _, id := range identifiers {
 		alias := strings.TrimSuffix(strings.TrimSpace(id), controllerSuffix)
 		if alias == "" {
-			// Preserve the invalid token so it is reported as failed during
-			// processing rather than silently dropped.
+			// Preserve the invalid token so it is reported as failed during processing
+			// rather than silently dropped.
 			names = append(names, strings.TrimSpace(id))
 			continue
 		}
@@ -143,7 +142,7 @@ func (r *Remover) resolve(ap app.App, identifiers []string) ([]string, error) {
 
 // discoverControllers lists managed controller repositories (directories ending
 // in "-controller") directly under the workspace root, sorted by name.
-func (r *Remover) discoverControllers(ap app.App) ([]string, error) {
+func discoverControllers(ap app.App) ([]string, error) {
 	repos, err := workspace.Discover(ap.Config.WorkspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("discovering managed repositories under %q: %w", ap.Config.WorkspaceRoot, err)
@@ -200,8 +199,8 @@ func (r *Remover) process(ctx context.Context, ap app.App, name string, opts Opt
 		return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: previewReason(localExists, forkExists, opts)}
 	}
 
-	// Delete the fork first (the irreversible remote action). On failure leave
-	// the local clone intact so the user can retry.
+	// Delete the fork first (the irreversible remote action). On failure leave the
+	// local clone intact so the user can retry.
 	if forkExists {
 		if forkRef.Owner == "" || strings.EqualFold(forkRef.Owner, upstreamOwner) {
 			// Defensive: should be unreachable given the guards in Remove.

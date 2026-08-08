@@ -46,8 +46,8 @@ func newRefreshCommand(d deps, res *Result) *cobra.Command {
 
 			yes, _ := cmd.Flags().GetBool(flagYes)
 
-			// Require explicit confirmation for the destructive action unless
-			// the user opted out with --yes or is only previewing with --dry-run.
+			// Require explicit confirmation for the destructive action unless the user
+			// opted out with --yes or is only previewing with --dry-run.
 			if !a.DryRun && !yes {
 				ok, cerr := confirmRefresh(cmd, args)
 				if cerr != nil {
@@ -59,8 +59,8 @@ func newRefreshCommand(d deps, res *Result) *cobra.Command {
 				}
 			}
 
-			// args is the optional subset of repositories to refresh; an empty
-			// slice means "all managed repositories".
+			// args is the optional subset of repositories to refresh; an empty slice
+			// means "all managed repositories".
 			summary, err := d.refreshRun(cmdContext(cmd), a, args)
 			if err != nil {
 				return err
@@ -74,8 +74,9 @@ func newRefreshCommand(d deps, res *Result) *cobra.Command {
 }
 
 // confirmRefresh prints a warning describing the destructive action and reads a
-// confirmation line from the command's input. It returns true only when the user
-// types "yes". Input/output go through the cobra command so tests can drive them.
+// confirmation line from the command's input. It returns true only when the
+// user types "yes". Input/output go through the cobra command so tests can
+// drive them.
 func confirmRefresh(cmd *cobra.Command, identifiers []string) (bool, error) {
 	target := describeRefreshTargets(identifiers)
 	fmt.Fprintf(cmd.OutOrStdout(),

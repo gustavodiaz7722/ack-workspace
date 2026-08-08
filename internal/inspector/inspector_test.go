@@ -16,9 +16,9 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
-// makeWorkspace creates a temp Workspace_Root containing one subdirectory per
+// makeWorkspace creates a temp workspace root containing one subdirectory per
 // repo name, each holding a ".git" entry so workspace.Discover treats it as a
-// Managed_Repository.
+// managed repository.
 func makeWorkspace(t *testing.T, repos ...string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -39,8 +39,7 @@ func newApp(root string, runner git.Runner) app.App {
 }
 
 // TestStatusTableNormalRepos verifies the human-readable table for repositories
-// that are up to date, ahead, and behind, with clean/dirty working trees
-// (Requirements 6.1, 6.2, 6.4, 6.5).
+// that are up to date, ahead, and behind, with clean/dirty working trees.
 func TestStatusTableNormalRepos(t *testing.T) {
 	root := makeWorkspace(t, "code-generator", "runtime", "test-infra")
 	runner := &git.MockRunner{
@@ -80,7 +79,7 @@ func TestStatusTableNormalRepos(t *testing.T) {
 
 	out := buf.String()
 
-	// Repositories listed alphabetically (Requirement 6.1).
+	// Repositories listed alphabetically.
 	if i, j := strings.Index(out, "code-generator"), strings.Index(out, "runtime"); i < 0 || j < 0 || i > j {
 		t.Errorf("repos not listed alphabetically:\n%s", out)
 	}
@@ -95,8 +94,8 @@ func TestStatusTableNormalRepos(t *testing.T) {
 	}
 }
 
-// TestStatusJSON verifies that --json emits a single JSON document (array) whose
-// per-entry fields are correct (Requirement 6.8).
+// TestStatusJSON verifies that --json emits a single JSON document (array)
+// whose per-entry fields are correct.
 func TestStatusJSON(t *testing.T) {
 	root := makeWorkspace(t, "s3-controller")
 	runner := &git.MockRunner{
@@ -143,7 +142,7 @@ func TestStatusJSON(t *testing.T) {
 }
 
 // TestStatusDetachedHEAD verifies that a detached HEAD is reported as such with
-// no branch name, and the comparison is unavailable (Requirements 6.3, 6.6).
+// no branch name, and the comparison is unavailable.
 func TestStatusDetachedHEAD(t *testing.T) {
 	root := makeWorkspace(t, "runtime")
 	revListCalled := false
@@ -205,7 +204,7 @@ func TestStatusDetachedHEAD(t *testing.T) {
 // TestStatusComparisonUnavailableContinues verifies that when the ahead/behind
 // comparison cannot be determined for one repository (AheadBehind errors), that
 // repository is reported as "unavailable" and the remaining repositories are
-// still listed (Requirement 6.6).
+// still listed.
 func TestStatusComparisonUnavailableContinues(t *testing.T) {
 	root := makeWorkspace(t, "alpha", "beta")
 	runner := &git.MockRunner{
@@ -253,7 +252,7 @@ func TestStatusComparisonUnavailableContinues(t *testing.T) {
 }
 
 // TestStatusEmptyWorkspace verifies that an empty workspace produces a friendly
-// message and no error (Requirement 6.7).
+// message and no error.
 func TestStatusEmptyWorkspace(t *testing.T) {
 	root := makeWorkspace(t) // no repos
 
@@ -272,7 +271,7 @@ func TestStatusEmptyWorkspace(t *testing.T) {
 }
 
 // TestStatusEmptyWorkspaceJSON verifies that an empty workspace in JSON mode
-// emits an empty JSON array rather than null (Requirements 6.7, 6.8).
+// emits an empty JSON array rather than null.
 func TestStatusEmptyWorkspaceJSON(t *testing.T) {
 	root := makeWorkspace(t) // no repos
 

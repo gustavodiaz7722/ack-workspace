@@ -1,5 +1,5 @@
-// Package refresher implements the Workspace_Refresher, which reconciles each
-// Managed_Repository to a known-good baseline that is ready for development:
+// Package refresher reconciles each managed repository to a known-good baseline
+// that is ready for development:
 //
 //   - the fork's default branch is synced with upstream (server-side, via the
 //     GitHub merge-upstream API),

@@ -1,12 +1,10 @@
-// Package git defines the git.Runner interface, its os/exec implementation and
-// recording mock, and (in later tasks) the high-level Repo operations (Clone,
-// SetRemote, Fetch, FastForward, Push, Status, AheadBehind) used by the feature
-// components.
+// Package git defines the Runner interface, its os/exec implementation and
+// recording mock, and the high-level Repo operations built on top of them.
 //
 // All git invocations flow through the Runner abstraction so command
-// construction is centralized, arguments are passed without shell
-// interpolation (avoiding command injection), and tests can assert the exact
-// git argument vectors a component issues (Requirements 1.1, 8.3).
+// construction is centralized, arguments are passed without shell interpolation
+// (avoiding command injection), and tests can assert the exact git argument
+// vectors a component issues.
 package git
 
 import (
@@ -20,16 +18,15 @@ import (
 // every git invocation passes, so it can be mocked in tests and so argument
 // construction stays centralized and injection-safe.
 type Runner interface {
-	// Run executes `git <args...>` in dir and returns the combined
-	// stdout+stderr output together with any error. Arguments are passed
-	// directly to the git process (no shell), so values never undergo shell
-	// interpolation.
+	// Run executes `git <args...>` in dir and returns the combined stdout+stderr
+	// output together with any error. Arguments are passed directly to the git
+	// process (no shell), so values never undergo shell interpolation.
 	Run(ctx context.Context, dir string, args ...string) (string, error)
 }
 
 // ExecRunner is the production Runner. It invokes the system `git` executable
-// resolved on the PATH (whose presence the Prerequisite_Checker guarantees,
-// Requirement 1.1) and returns its combined output.
+// resolved on the PATH (whose presence the prerequisite checker guarantees) and
+// returns its combined output.
 type ExecRunner struct {
 	// Bin is the git executable to invoke. When empty it defaults to "git",
 	// resolved against the PATH.
@@ -59,8 +56,8 @@ func (r *ExecRunner) Run(ctx context.Context, dir string, args ...string) (strin
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 
-	// Capture stdout and stderr into a single buffer so callers see the
-	// combined output regardless of which stream git wrote to.
+	// Capture stdout and stderr into a single buffer so callers see the combined
+	// output regardless of which stream git wrote to.
 	var combined bytes.Buffer
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined

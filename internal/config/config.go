@@ -1,6 +1,6 @@
-// Package config implements the Configuration_Manager: it resolves the
-// effective configuration for an invocation (flag > env > persisted > default)
-// and persists durable settings to $HOME/.ack-workspace/config.
+// Package config resolves the effective configuration for an invocation (flag >
+// env > persisted > default) and persists durable settings to
+// $HOME/.ack-workspace/config.
 package config
 
 import (
@@ -19,7 +19,7 @@ const configFileName = "config"
 
 // Config holds the effective configuration values for a command invocation.
 type Config struct {
-	GitHubUser    string // GitHub_Identity
+	GitHubUser    string // GitHub identity
 	WorkspaceRoot string // absolute path
 	RepoPrefix    string // default "ack-"
 	Concurrency   int    // default 4, range 1..32
@@ -35,8 +35,8 @@ type Source struct {
 // Manager resolves the effective configuration for an invocation and persists
 // durable settings.
 type Manager interface {
-	// Resolve applies precedence: flag > env > persisted file > default.
-	// Returns a typed error if the file is unparsable or a required value is missing.
+	// Resolve applies precedence: flag > env > persisted file > default. Returns a
+	// typed error if the file is unparsable or a required value is missing.
 	Resolve(src Source) (Config, error)
 	// Save persists GitHubUser, WorkspaceRoot, RepoPrefix (never Token).
 	Save(c Config) error
@@ -45,7 +45,7 @@ type Manager interface {
 }
 
 // fileConfig is the on-disk TOML representation. The token is intentionally
-// absent so it is never written to disk (Requirement 2.5).
+// absent so it is never written to disk.
 type fileConfig struct {
 	GitHubUser    string `toml:"github_user"`
 	WorkspaceRoot string `toml:"workspace_root"`
@@ -64,8 +64,8 @@ func NewManager() Manager {
 	return &manager{home: os.Getenv("HOME")}
 }
 
-// NewManagerWithHome returns a Manager rooted at the given home directory. It is
-// primarily intended for tests that need an isolated $HOME.
+// NewManagerWithHome returns a Manager rooted at the given home directory. It
+// is primarily intended for tests that need an isolated $HOME.
 func NewManagerWithHome(home string) Manager {
 	return &manager{home: home}
 }
@@ -82,7 +82,7 @@ func (m *manager) dir() string {
 
 // Save persists GitHubUser, WorkspaceRoot, and RepoPrefix as TOML to Path(),
 // creating $HOME/.ack-workspace if it does not exist. The Token is never
-// written (Requirement 2.5).
+// written.
 func (m *manager) Save(c Config) error {
 	if err := os.MkdirAll(m.dir(), 0o755); err != nil {
 		return fmt.Errorf("creating config directory %q: %w", m.dir(), err)
@@ -106,4 +106,4 @@ func (m *manager) Save(c Config) error {
 	return nil
 }
 
-// Resolve is implemented in resolve.go (Task 2.2).
+// Resolve is implemented in resolve.go.

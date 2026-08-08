@@ -33,26 +33,26 @@ const (
 	flagTimeout = "timeout"
 )
 
-// newAttributionCommand builds the `attribution` subcommand, which regenerates a
-// controller's ATTRIBUTION.md by running the upstream attribution-gen tool on
+// newAttributionCommand builds the `attribution` subcommand, which regenerates
+// a controller's ATTRIBUTION.md by running the upstream attribution-gen tool on
 // ephemeral AWS CodeBuild compute.
 //
 // The remote compute is a requirement, not an optimization: generating the
 // document walks the module dependency graph, which needs the public Go module
-// proxy, and those fetches are blocked from inside the Amazon corporate network.
-// Running the generator on CodeBuild is what makes the command work from a
-// corporate desktop at all.
+// proxy, and those fetches are blocked from inside the Amazon corporate
+// network. Running the generator on CodeBuild is what makes the command work
+// from a corporate desktop at all.
 //
 // The command reads the controller's checked-out branch and lists refs on the
 // remote, so it declares the git prerequisite. It deliberately does not declare
 // the GitHub identity prerequisite: an identity is only needed to derive the
-// fork URL, and --upstream or --repo remove that need, so declaring it here would
-// wrongly block those paths. When an identity is genuinely required and missing,
-// the Controller_Attributor reports it with a targeted, actionable error.
+// fork URL, and --upstream or --repo remove that need, so declaring it here
+// would wrongly block those paths. When an identity is genuinely required and
+// missing, the attributor reports it with a targeted, actionable error.
 //
 // AWS credentials come from the default chain. Note that this command
-// provisions resources in the caller's AWS account on first use (an IAM role, an
-// S3 bucket, and a CodeBuild project); --dry-run previews all of it without
+// provisions resources in the caller's AWS account on first use (an IAM role,
+// an S3 bucket, and a CodeBuild project); --dry-run previews all of it without
 // creating anything.
 func newAttributionCommand(d deps, res *Result) *cobra.Command {
 	cmd := &cobra.Command{
@@ -110,8 +110,8 @@ func newAttributionCommand(d deps, res *Result) *cobra.Command {
 				},
 			}
 
-			// An empty identifier list is validated by the Controller_Attributor so
-			// the rule lives in one place and maps to the usage exit code.
+			// An empty identifier list is validated by the attributor so the rule lives
+			// in one place and maps to the usage exit code.
 			summary, err := d.attributionRun(cmdContext(cmd), a, args, opts, region, cmd.OutOrStdout())
 			if err != nil {
 				return err

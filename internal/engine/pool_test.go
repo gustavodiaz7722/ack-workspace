@@ -11,9 +11,9 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
-// makeTasks builds n tasks that each return a successful Result for a repo named
-// "repo-<i>". The repo names are intentionally generated out of sorted order to
-// exercise the deterministic sort.
+// makeTasks builds n tasks that each return a successful Result for a repo
+// named "repo-<i>". The repo names are intentionally generated out of sorted
+// order to exercise the deterministic sort.
 func makeTasks(n int) []Task {
 	tasks := make([]Task, n)
 	for i := 0; i < n; i++ {
@@ -27,8 +27,6 @@ func makeTasks(n int) []Task {
 
 // TestRunBoundedConcurrency asserts that the observed maximum number of tasks
 // running simultaneously never exceeds the configured limit.
-//
-// Validates: Requirements 7.1, 7.2
 func TestRunBoundedConcurrency(t *testing.T) {
 	for _, limit := range []int{1, 2, 4, 8} {
 		limit := limit
@@ -69,8 +67,6 @@ func TestRunBoundedConcurrency(t *testing.T) {
 
 // TestRunContinueOnError asserts that a task returning a failed Result does not
 // stop the other tasks: every task still runs and contributes a Result.
-//
-// Validates: Requirement 7.4
 func TestRunContinueOnError(t *testing.T) {
 	const numTasks = 10
 	var executed int32
@@ -114,8 +110,6 @@ func TestRunContinueOnError(t *testing.T) {
 
 // TestRunCompleteAndSorted asserts the result set is complete (one Result per
 // task) and sorted deterministically by repo name.
-//
-// Validates: Requirements 7.4
 func TestRunCompleteAndSorted(t *testing.T) {
 	const numTasks = 20
 	tasks := makeTasks(numTasks)

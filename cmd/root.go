@@ -33,21 +33,21 @@ import (
 // directly onto a configuration key.
 const FlagDryRun = "dry-run"
 
-// flagRegion is the per-command flag naming the AWS region a subcommand operates
-// in. It lives here rather than on one command because deploy and attribution
-// both accept it, each documenting its own default and meaning.
+// flagRegion is the per-command flag naming the AWS region a subcommand
+// operates in. It lives here rather than on one command because deploy and
+// attribution both accept it, each documenting its own default and meaning.
 const flagRegion = "region"
 
 // Concurrency bounds. A resolved concurrency value outside this inclusive range
-// is rejected before any work is performed (Requirement 7.3).
+// is rejected before any work is performed.
 const (
 	minConcurrency = 1
 	maxConcurrency = 32
 )
 
 // UsageError marks an argument or validation failure (as opposed to a runtime
-// failure during repository processing). The CLI entrypoint (Task 13.3) may map
-// it to a distinct non-zero exit code for usage errors.
+// failure during repository processing), which main.go maps to its own exit
+// code.
 type UsageError struct {
 	Msg string
 }
@@ -55,16 +55,11 @@ type UsageError struct {
 func (e *UsageError) Error() string { return e.Msg }
 
 // Result is the seam through which a subcommand hands its aggregated outcome to
-// the process entrypoint (main.go, Task 13.3) so the entrypoint can render the
-// summary and derive the exit code.
+// main.go, which renders the summary and derives the exit code.
 //
-// The batch commands (init, add, refresh) and the read-only status command stash
-// the workspace.Summary they produced via set; the config command produces no
-// summary and leaves the Result empty. main.go obtains the Result from Execute
-// and applies the exit-code policy: non-zero on a pre-flight/usage error (the
-// error returned by Execute) or when the stashed Summary HasFailures, zero
-// otherwise. Rendering of the created/skipped/failed summary itself is the
-// responsibility of Task 13.3; 13.2 only populates this Result.
+// Most commands stash the workspace.Summary they produced; status stashes an
+// empty one because it has already rendered its own output, and config stashes
+// none at all.
 type Result struct {
 	summary      workspace.Summary
 	hasSummary   bool
@@ -80,10 +75,10 @@ func (r *Result) set(s workspace.Summary) {
 	r.hasSummary = true
 }
 
-// setLabeled records the Summary together with the label the renderer should use
-// for the OutcomeCreated bucket. The add command passes "added" (Requirement
-// 4.9) and the refresh command passes "refreshed" so the human summary reads in
-// the command's own terms.
+// setLabeled records the Summary together with the label the renderer should
+// use for the OutcomeCreated bucket, so the summary reads in the command's own
+// terms ("added", "refreshed", "deployed", …) rather than always saying
+// "created".
 func (r *Result) setLabeled(s workspace.Summary, createdLabel string) {
 	r.summary = s
 	r.hasSummary = true
@@ -113,39 +108,39 @@ func (r *Result) CreatedLabel() string {
 type deps struct {
 	// checker verifies a command's declared prerequisites before it delegates.
 	checker prereq.Checker
-	// initRun runs the Workspace_Initializer for the init command.
+	// initRun runs the initializer for the init command.
 	initRun func(ctx context.Context, a app.App) (workspace.Summary, error)
-	// addRun runs the Controller_Adder for the add command.
+	// addRun runs the adder for the add command.
 	addRun func(ctx context.Context, a app.App, identifiers []string) (workspace.Summary, error)
-	// refreshRun runs the Workspace_Refresher for the refresh command.
+	// refreshRun runs the refresher for the refresh command.
 	refreshRun func(ctx context.Context, a app.App, only []string) (workspace.Summary, error)
-	// statusRun runs the Workspace_Inspector for the status command. The writer
-	// is threaded through so inspector output is directed at the command's
-	// stdout (and is capturable in tests).
+	// statusRun runs the inspector for the status command. The writer is threaded
+	// through so inspector output is directed at the command's stdout (and is
+	// capturable in tests).
 	statusRun func(ctx context.Context, a app.App, jsonOut bool, out io.Writer) (workspace.Summary, error)
-	// removeRun runs the Controller_Remover for the remove command.
+	// removeRun runs the remover for the remove command.
 	removeRun func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error)
-	// releaseRun runs the Controller_Releaser for the release command.
+	// releaseRun runs the releaser for the release command.
 	releaseRun func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool, prBody string) (workspace.Summary, error)
-	// deployRun runs the Controller_Deployer for the deploy command: it builds the
-	// controller from local source and deploys it to the target cluster, which is
-	// either the current kubeconfig context or a managed cluster deploy
-	// bootstraps. The knobs travel as a deployer.Options rather than a positional
-	// list so adding one does not ripple through this seam.
+	// deployRun runs the deployer for the deploy command: it builds the controller
+	// from local source and deploys it to the target cluster, which is either the
+	// current kubeconfig context or a managed cluster deploy bootstraps. The knobs
+	// travel as a deployer.Options rather than a positional list so adding one
+	// does not ripple through this seam.
 	deployRun func(ctx context.Context, a app.App, service string, opts deployer.Options) (workspace.Summary, error)
-	// buildRun runs the Controller_Builder for the build command: it regenerates
-	// the controller's code from local source via the code-generator's
-	// `make build-controller` target.
+	// buildRun runs the builder for the build command: it regenerates the
+	// controller's code from local source via the code-generator's `make
+	// build-controller` target.
 	buildRun func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error)
 	// candidatesRun runs the scanner's Indexer for the candidates command: it
 	// emits the deterministic cross-resource-reference candidate index. Records
-	// are written to out and progress/suppression notes to errOut, so stdout
-	// stays machine-readable.
+	// are written to out and progress/suppression notes to errOut, so stdout stays
+	// machine-readable.
 	candidatesRun func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error)
-	// attributionRun runs the Controller_Attributor for the attribution command:
-	// it generates each controller's ATTRIBUTION.md on ephemeral CodeBuild compute
-	// and writes the result into the local checkout. The writer receives the
-	// notice describing any AWS resource that had to be provisioned.
+	// attributionRun runs the attributor for the attribution command: it generates
+	// each controller's ATTRIBUTION.md on ephemeral CodeBuild compute and writes
+	// the result into the local checkout. The writer receives the notice
+	// describing any AWS resource that had to be provisioned.
 	attributionRun func(ctx context.Context, a app.App, identifiers []string, opts attributor.Options, region string, out io.Writer) (workspace.Summary, error)
 }
 
@@ -199,9 +194,10 @@ func defaultDeps() deps {
 	}
 }
 
-// NewRootCommand builds the ack-workspace root command, registers the persistent
-// flags shared by every subcommand, and attaches the
-// init/add/refresh/status/config subcommands wired to the production components.
+// NewRootCommand builds the ack-workspace root command, registers the
+// persistent flags shared by every subcommand, and attaches the
+// init/add/refresh/status/config subcommands wired to the production
+// components.
 func NewRootCommand() *cobra.Command {
 	cmd, _ := newRootCmd(defaultDeps())
 	return cmd
@@ -219,8 +215,8 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		Long: "ack-workspace streamlines local workspace setup for ACK contributors: it forks, " +
 			"clones, and configures the core and service-controller repositories, keeps managed " +
 			"forks current with upstream, and reports the state of every managed repository.",
-		// The command layer prints its own errors and exit codes (Task 13.3),
-		// so suppress cobra's automatic usage/error echo on failure.
+		// The command layer prints its own errors and exit codes, so suppress cobra's
+		// automatic usage/error echo on failure.
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -243,10 +239,10 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 	return cmd, res
 }
 
-// Execute builds the root command and runs it, returning the Result a subcommand
-// populated together with any error. The process entrypoint (main.go, Task 13.3)
-// maps these to an exit code: non-zero on a non-nil error or when the Result's
-// Summary HasFailures, zero otherwise.
+// Execute builds the root command and runs it, returning the Result a
+// subcommand populated together with any error. main.go maps these to an exit
+// code: non-zero on a non-nil error or when the Result's Summary HasFailures,
+// zero otherwise.
 func Execute() (*Result, error) {
 	cmd, res := newRootCmd(defaultDeps())
 	err := cmd.Execute()
@@ -256,11 +252,11 @@ func Execute() (*Result, error) {
 // prepare performs the fail-fast pre-flight for a batch command: it builds the
 // App from the resolved, validated configuration and then runs the prerequisite
 // Check declared by need BEFORE any component (and therefore any git or GitHub
-// operation) runs (Requirements 1.1, 1.3, 1.5, 1.7). buildApp performs no
-// network work, so running the check after it preserves the "no side effects
-// before validation" guarantee. A returned error is a pre-flight failure
-// (config resolution, invalid concurrency, or a missing prerequisite) and stops
-// the command before it delegates.
+// operation) runs. buildApp performs no network work, so running the check
+// after it preserves the "no side effects before validation" guarantee. A
+// returned error is a pre-flight failure (config resolution, invalid
+// concurrency, or a missing prerequisite) and stops the command before it
+// delegates.
 func (d deps) prepare(cmd *cobra.Command, need prereq.Need) (app.App, error) {
 	a, err := buildApp(cmd)
 	if err != nil {
@@ -299,8 +295,9 @@ func addPersistentFlags(cmd *cobra.Command) {
 // buildSource assembles a config.Source from the flags the user actually set on
 // this invocation plus the relevant environment variables. Only flags reported
 // as Changed are placed in Source.Flags, so an unset flag does not override a
-// persisted or environment value (the precedence rules of Requirement 2.4).
-// GITHUB_USER and GITHUB_TOKEN are captured into Source.Env when non-empty.
+// persisted or environment value, which is what makes the precedence rules
+// work. GITHUB_USER and GITHUB_TOKEN are captured into Source.Env when
+// non-empty.
 func buildSource(cmd *cobra.Command) config.Source {
 	fs := cmd.Flags()
 
@@ -332,9 +329,8 @@ func buildSource(cmd *cobra.Command) config.Source {
 	return config.Source{Flags: flags, Env: env}
 }
 
-// validateConcurrency enforces the inclusive 1..32 range (Requirement 7.3),
-// returning a *UsageError that names the accepted range when the value is out
-// of bounds.
+// validateConcurrency enforces the inclusive 1..32 range, returning a
+// *UsageError that names the accepted range when the value is out of bounds.
 func validateConcurrency(n int) error {
 	if n < minConcurrency || n > maxConcurrency {
 		return &UsageError{Msg: fmt.Sprintf(
@@ -349,9 +345,9 @@ func validateConcurrency(n int) error {
 // the App context shared by the feature components. It fails fast, before any
 // repository work: configuration resolution errors (a missing identity, an
 // unparsable file) and an out-of-range concurrency value are returned here so
-// the command never begins side-effecting work with invalid input
-// (Requirements 2.4, 7.3). The GitHub adapter and git runner are real clients;
-// constructing the adapter performs no network request (Requirements 2.4, 7.2).
+// the command never begins side-effecting work with invalid input. The GitHub
+// adapter and git runner are real clients; constructing the adapter performs no
+// network request.
 func buildApp(cmd *cobra.Command) (app.App, error) {
 	src := buildSource(cmd)
 

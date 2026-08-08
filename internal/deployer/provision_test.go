@@ -1,13 +1,13 @@
 // Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
-// Licensed under the Apache License, Version 2.0 (the "License"). You may
-// not use this file except in compliance with the License. A copy of the
-// License is located at
+// Licensed under the Apache License, Version 2.0 (the "License"). You may not
+// use this file except in compliance with the License. A copy of the License is
+// located at
 //
 //     http://aws.amazon.com/apache2.0/
 //
-// or in the "license" file accompanying this file. This file is distributed
-// on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+// or in the "license" file accompanying this file. This file is distributed on
+// an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 // express or implied. See the License for the specific language governing
 // permissions and limitations under the License.
 
@@ -74,8 +74,8 @@ func (f *fakeCluster) Deploy(_ context.Context, p DeployParams) error {
 	return nil
 }
 
-// fakeProvisioner records every cluster-lifecycle call so a test can assert both
-// what was provisioned and, just as importantly, what was left alone.
+// fakeProvisioner records every cluster-lifecycle call so a test can assert
+// both what was provisioned and, just as importantly, what was left alone.
 type fakeProvisioner struct {
 	exists    bool
 	existsErr error
@@ -168,10 +168,11 @@ func deployFixture(exists bool) (*Deployer, *fakeBuilder, *fakeRegistry, *fakeCl
 
 // --- cluster configuration rendering ---------------------------------------
 
-// TestRenderClusterConfig_AutoModeAndPodIdentity pins the shape of the generated
-// eksctl document: Auto Mode enabled (which is what makes compute, networking and
-// the pod identity agent built-in capabilities rather than addons) and exactly
-// one pod identity association for the controller service account.
+// TestRenderClusterConfig_AutoModeAndPodIdentity pins the shape of the
+// generated eksctl document: Auto Mode enabled (which is what makes compute,
+// networking and the pod identity agent built-in capabilities rather than
+// addons) and exactly one pod identity association for the controller service
+// account.
 func TestRenderClusterConfig_AutoModeAndPodIdentity(t *testing.T) {
 	doc, err := renderClusterConfig(ClusterSpec{
 		Name:           ClusterName,
@@ -258,9 +259,9 @@ func TestClusterNameIsFixed(t *testing.T) {
 
 // --- deploy flow -----------------------------------------------------------
 
-// TestDeploy_BootstrapsMissingCluster is the headline case: with the development
-// cluster absent, a deploy creates it, binds credentials to the shared service
-// account, and deploys the controller under that account.
+// TestDeploy_BootstrapsMissingCluster is the headline case: with the
+// development cluster absent, a deploy creates it, binds credentials to the
+// shared service account, and deploys the controller under that account.
 func TestDeploy_BootstrapsMissingCluster(t *testing.T) {
 	root := workspaceWithController(t, "ecr-controller")
 	d, builder, _, cluster, prov := deployFixture(false)
@@ -291,8 +292,8 @@ func TestDeploy_BootstrapsMissingCluster(t *testing.T) {
 		t.Errorf("policy ARNs = %v, want [%s]", spec.PolicyARNs, DefaultPolicyARN)
 	}
 
-	// The kubeconfig must be repointed, otherwise helm would install onto
-	// whatever context happened to be selected before.
+	// The kubeconfig must be repointed, otherwise helm would install onto whatever
+	// context happened to be selected before.
 	if len(prov.kubeconfig) != 1 || prov.kubeconfig[0] != ClusterName+"/us-west-2" {
 		t.Errorf("kubeconfig updates = %v, want one for %s/us-west-2", prov.kubeconfig, ClusterName)
 	}
@@ -303,8 +304,8 @@ func TestDeploy_BootstrapsMissingCluster(t *testing.T) {
 		t.Fatal("pod identity association was not ensured")
 	}
 
-	// The controller must run under the account the association is attached to,
-	// or it starts with no AWS credentials.
+	// The controller must run under the account the association is attached to, or
+	// it starts with no AWS credentials.
 	if cluster.params == nil {
 		t.Fatal("controller was not deployed")
 	}
@@ -321,8 +322,8 @@ func TestDeploy_BootstrapsMissingCluster(t *testing.T) {
 
 // TestDeploy_ReusesExistingClusterAndStillRepointsKubeconfig pins the one-time
 // nature of the bootstrap alongside the guarantee that matters on every run: a
-// later deploy creates no cluster, but still repoints the kubeconfig so it cannot
-// install onto whichever context happened to be selected.
+// later deploy creates no cluster, but still repoints the kubeconfig so it
+// cannot install onto whichever context happened to be selected.
 func TestDeploy_ReusesExistingClusterAndStillRepointsKubeconfig(t *testing.T) {
 	root := workspaceWithController(t, "ecr-controller")
 	d, _, _, _, prov := deployFixture(true)
@@ -371,9 +372,9 @@ func TestDeploy_ServiceAccountOverride(t *testing.T) {
 }
 
 // TestDeploy_AmbiguousClusterLookupDoesNotCreate is the safety case: when the
-// existence check itself fails (expired credentials, no network, a denied call),
-// deploy must fail rather than interpret the failure as "absent" and start a
-// 15-25 minute cluster creation.
+// existence check itself fails (expired credentials, no network, a denied
+// call), deploy must fail rather than interpret the failure as "absent" and
+// start a 15-25 minute cluster creation.
 func TestDeploy_AmbiguousClusterLookupDoesNotCreate(t *testing.T) {
 	root := workspaceWithController(t, "ecr-controller")
 	d, builder, _, _, prov := deployFixture(false)

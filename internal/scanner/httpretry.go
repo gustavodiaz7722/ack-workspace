@@ -10,12 +10,12 @@ import (
 // httpMaxAttempts is the total number of times a request is issued before
 // giving up (the first try plus retries). GitHub's raw and API endpoints
 // occasionally return a transient 5xx or throttle with 429; a few retries with
-// backoff smooth those over without burning agent conversation turns.
+// backoff smooth those over so one blip does not degrade a whole index.
 const httpMaxAttempts = 4
 
 // httpRetryBackoff is the base delay for the exponential backoff between
-// attempts (base, 2x, 4x, ...). It is a var, not a const, so tests can shrink it
-// to keep retry paths fast.
+// attempts (base, 2x, 4x, ...). It is a var, not a const, so tests can shrink
+// it to keep retry paths fast.
 var httpRetryBackoff = 300 * time.Millisecond
 
 // isRetryableStatus reports whether an HTTP status warrants a retry: rate
@@ -31,9 +31,9 @@ func isRetryableStatus(code int) bool {
 // across Do calls.
 //
 // On the final outcome it returns the response with its body still open for the
-// caller to read and close (including a non-retryable non-200, so the caller can
-// inspect the status). It returns the last error only when every attempt fails
-// at the transport level or the context is cancelled during backoff.
+// caller to read and close (including a non-retryable non-200, so the caller
+// can inspect the status). It returns the last error only when every attempt
+// fails at the transport level or the context is cancelled during backoff.
 func getWithRetry(ctx context.Context, client *http.Client, newReq func() (*http.Request, error)) (*http.Response, error) {
 	var lastErr error
 	for attempt := 1; attempt <= httpMaxAttempts; attempt++ {
@@ -54,8 +54,8 @@ func getWithRetry(ctx context.Context, client *http.Client, newReq func() (*http
 			lastErr = err
 			continue
 		}
-		// Retry a transient status only while attempts remain; on the last
-		// attempt return the response so the caller reports the real status.
+		// Retry a transient status only while attempts remain; on the last attempt
+		// return the response so the caller reports the real status.
 		if isRetryableStatus(resp.StatusCode) && attempt < httpMaxAttempts {
 			lastErr = fmt.Errorf("unexpected status %s", resp.Status)
 			resp.Body.Close()

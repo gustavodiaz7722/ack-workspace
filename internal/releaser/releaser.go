@@ -1,5 +1,5 @@
-// Package releaser implements the Controller_Releaser, which cuts a release for
-// a single service controller by mechanizing the manual ACK release workflow:
+// Package releaser cuts a release for a single service controller by
+// mechanizing the manual ACK release workflow:
 //
 //  1. update the controller's base branch from upstream,
 //  2. create a release branch named "release-<version>",
@@ -13,8 +13,9 @@
 // is already present in the workspace; it never forks or clones. It is
 // deliberately conservative: a repository with uncommitted local changes is
 // skipped so in-flight work is never mixed into a release, a base branch that
-// has diverged from upstream is reported as a failure rather than force-updated,
-// and in dry-run mode it reports the steps it would take and touches nothing.
+// has diverged from upstream is reported as a failure rather than
+// force-updated, and in dry-run mode it reports the steps it would take and
+// touches nothing.
 package releaser
 
 import (
@@ -34,15 +35,15 @@ import (
 )
 
 const (
-	// upstreamOwner is the GitHub organization that hosts the canonical
-	// (upstream) ACK repositories. Releases target it as the PR base.
+	// upstreamOwner is the GitHub organization that hosts the canonical (upstream)
+	// ACK repositories. Releases target it as the PR base.
 	upstreamOwner = "aws-controllers-k8s"
 	// controllerSuffix is the conventional suffix of every service controller
 	// repository name. A bare alias ("ecr") and its full form ("ecr-controller")
 	// both normalize to the same repository.
 	controllerSuffix = "-controller"
-	// codegenDirName is the directory under the workspace root that holds the
-	// ACK code-generator (and its release build script).
+	// codegenDirName is the directory under the workspace root that holds the ACK
+	// code-generator (and its release build script).
 	codegenDirName = "code-generator"
 	// releaseScript is the code-generator script that regenerates a controller's
 	// release artifacts. It is invoked from the code-generator directory.
@@ -50,8 +51,8 @@ const (
 	// defaultBaseBranch is the branch a release is cut from when the caller does
 	// not override it.
 	defaultBaseBranch = "main"
-	// releaseVersionEnv is the environment variable the release build script
-	// reads to learn which version it is generating.
+	// releaseVersionEnv is the environment variable the release build script reads
+	// to learn which version it is generating.
 	releaseVersionEnv = "RELEASE_VERSION"
 
 	upstreamRemote = "upstream"
@@ -63,9 +64,9 @@ const (
 // suffix (for example v1.0.1 or v1.2.0-rc.1).
 var versionPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+([-+][0-9A-Za-z.\-]+)?$`)
 
-// UsageError is a typed argument/validation error returned by Release before any
-// repository is touched (a missing service identifier or an invalid version).
-// The cmd layer maps it to a distinct usage exit code.
+// UsageError is a typed argument/validation error returned by Release before
+// any repository is touched (a missing service identifier or an invalid
+// version). The cmd layer maps it to a distinct usage exit code.
 type UsageError struct{ Msg string }
 
 func (e *UsageError) Error() string { return e.Msg }
@@ -82,21 +83,21 @@ type ScriptRunner interface {
 
 // Options controls release behavior.
 type Options struct {
-	// Version is the release version (for example "v1.0.1"). It is required and
-	// is normalized to carry a leading "v".
+	// Version is the release version (for example "v1.0.1"). It is required and is
+	// normalized to carry a leading "v".
 	Version string
-	// BaseBranch is the branch the release is cut from. It defaults to "main"
-	// when empty.
+	// BaseBranch is the branch the release is cut from. It defaults to "main" when
+	// empty.
 	BaseBranch string
-	// SkipPR, when true, pushes the release branch to the fork but does not open
-	// a pull request against upstream.
+	// SkipPR, when true, pushes the release branch to the fork but does not open a
+	// pull request against upstream.
 	SkipPR bool
 	// PRBody, when non-empty, overrides the default pull request body. It is
 	// ignored when SkipPR is true.
 	PRBody string
 }
 
-// Releaser implements the Controller_Releaser.
+// Releaser cuts a controller release and opens its pull request.
 type Releaser struct {
 	script ScriptRunner
 }
@@ -106,16 +107,16 @@ func New() *Releaser {
 	return &Releaser{script: execScriptRunner{}}
 }
 
-// NewWithScriptRunner returns a Releaser backed by the supplied ScriptRunner. It
-// is intended for tests that need to script or record release-script execution
-// without invoking the real code-generator.
+// NewWithScriptRunner returns a Releaser backed by the supplied ScriptRunner.
+// It is intended for tests that need to script or record release-script
+// execution without invoking the real code-generator.
 func NewWithScriptRunner(s ScriptRunner) *Releaser {
 	return &Releaser{script: s}
 }
 
-// Release cuts a release for the controller named by service at opts.Version and
-// returns a single-result Summary recording the outcome (released, skipped, or
-// failed).
+// Release cuts a release for the controller named by service at opts.Version
+// and returns a single-result Summary recording the outcome (released, skipped,
+// or failed).
 //
 // The returned error is non-nil only for a pre-flight validation failure (an
 // empty service identifier, an invalid version, or a missing identity when a PR
@@ -147,9 +148,9 @@ func (r *Releaser) Release(ctx context.Context, ap app.App, service string, opts
 	return workspace.Summary{Results: []workspace.Result{result}}, nil
 }
 
-// process runs the full release flow for one controller and returns its terminal
-// Result. It never returns an error out-of-band: every failure is captured into
-// a failed Result.
+// process runs the full release flow for one controller and returns its
+// terminal Result. It never returns an error out-of-band: every failure is
+// captured into a failed Result.
 func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base string, opts Options) workspace.Result {
 	name := alias + controllerSuffix
 	root := ap.Config.WorkspaceRoot
@@ -157,8 +158,8 @@ func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base
 	codegenPath := filepath.Join(root, codegenDirName)
 	branch := "release-" + version
 
-	// Pre-flight: the controller and the code-generator must already be present
-	// in the workspace. Releasing neither forks nor clones.
+	// Pre-flight: the controller and the code-generator must already be present in
+	// the workspace. Releasing neither forks nor clones.
 	if !dirExists(controllerPath) {
 		return failed(name, fmt.Errorf("controller %s not found at %s; add it first with `ack-workspace add %s`", name, controllerPath, alias))
 	}
@@ -176,8 +177,8 @@ func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base
 		return r.preview(name, branch, base, version, opts)
 	}
 
-	// Safety: never run a release on top of uncommitted local work, which could
-	// be swept into the release commit by `git commit -a`.
+	// Safety: never run a release on top of uncommitted local work, which could be
+	// swept into the release commit by `git commit -a`.
 	dirty, err := repo.IsDirty(ctx)
 	if err != nil {
 		return failed(name, fmt.Errorf("checking working tree: %w", err))
@@ -270,8 +271,8 @@ func (r *Releaser) openPullRequest(ctx context.Context, ap app.App, name, branch
 	})
 }
 
-// defaultPRBody builds the generated pull request body used when the caller does
-// not supply one.
+// defaultPRBody builds the generated pull request body used when the caller
+// does not supply one.
 func defaultPRBody(name, version string) string {
 	return fmt.Sprintf(
 		"Release artifacts for `%s` version `%s`.\n\nOpened by `ack-workspace release`.",
@@ -309,9 +310,9 @@ func normalizeVersion(v string) (string, error) {
 	return v, nil
 }
 
-// execScriptRunner is the production ScriptRunner. It invokes the code-generator
-// release build script with the working directory set to the code-generator
-// directory and RELEASE_VERSION exported in the environment.
+// execScriptRunner is the production ScriptRunner. It invokes the
+// code-generator release build script with the working directory set to the
+// code-generator directory and RELEASE_VERSION exported in the environment.
 type execScriptRunner struct{}
 
 // Run executes `./scripts/build-controller-release.sh <service>` in codegenDir

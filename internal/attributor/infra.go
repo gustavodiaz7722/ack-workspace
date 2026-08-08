@@ -44,15 +44,13 @@ const (
 	envArtifactKey    = "ARTIFACT_KEY"
 )
 
-// attributionHeader is the first line every attribution-gen document carries. It
-// is used to validate a fetched artifact before it is allowed to overwrite a
+// attributionHeader is the first line every attribution-gen document carries.
+// It is used to validate a fetched artifact before it is allowed to overwrite a
 // checked-in ATTRIBUTION.md.
 //
-// This check is the direct lesson of the superseded approach: because that script
-// rebuilt the file from CloudWatch log text, a partial or reordered log run
-// produced a plausible-looking but truncated document with no signal that
-// anything was wrong. Refusing to write anything that does not start like a real
-// attribution document turns that silent corruption into a loud failure.
+// Refusing to write anything that does not start like a real attribution
+// document turns a truncated or partial artifact into a loud failure rather
+// than a plausible-looking file that silently replaces a good one.
 const attributionHeader = "# Open Source Software Attribution"
 
 // withDefaults returns a copy of in with every empty field filled from the
@@ -79,13 +77,12 @@ func (in Infrastructure) withDefaults() Infrastructure {
 
 // buildspec renders the inline buildspec the CodeBuild project runs.
 //
-// The project is created with a NO_SOURCE source type and this buildspec clones
-// the target repository itself. That choice removes two problems the superseded
-// scripts had. First, a GITHUB source type ties the project to one repository and
-// requires CodeBuild-level GitHub source credentials; cloning in the build works
-// for any public ACK repository with no credential setup. Second, it means the
-// repository and ref are per-build inputs, so the project never has to be mutated
-// between runs and concurrent runs cannot interfere.
+// The project uses a NO_SOURCE source type and this buildspec clones the target
+// repository itself, for two reasons. A GITHUB source type would tie the
+// project to one repository and require CodeBuild-level GitHub credentials,
+// whereas cloning in the build works for any public ACK repository with no
+// setup. And it makes the repository and ref per-build inputs, so the project
+// is never mutated between runs.
 //
 // The clone is a fetch of a single ref at depth 1 rather than `git clone
 // --branch`, because the same form works for a branch, a tag, and a pull request
@@ -148,13 +145,12 @@ func trustPolicy() string {
 	return mustJSON(doc)
 }
 
-// permissionPolicy is the inline policy granting the build exactly what it needs:
-// its own log group, and write access to the artifact bucket.
+// permissionPolicy is the inline policy granting the build exactly what it
+// needs: its own log group, and write access to the artifact bucket.
 //
-// The superseded bootstrap script attached the managed CloudWatchLogsFullAccess
-// policy, which was both broader than necessary and only needed because logs were
-// being used as the file transport. Scoping to one log group and one bucket
-// prefix keeps the role least-privilege.
+// Scoping to one log group and one bucket prefix keeps the role
+// least-privilege; a managed policy such as CloudWatchLogsFullAccess would be
+// far broader than the build needs.
 func permissionPolicy(partition, region, accountID, project, bucket string) string {
 	logGroup := fmt.Sprintf("arn:%s:logs:%s:%s:log-group:/aws/codebuild/%s",
 		partition, region, accountID, project)
@@ -180,8 +176,9 @@ func permissionPolicy(partition, region, accountID, project, bucket string) stri
 	return mustJSON(doc)
 }
 
-// mustJSON marshals a policy document. The inputs are package-local literals, so
-// a marshal failure would be a programming error rather than a runtime condition.
+// mustJSON marshals a policy document. The inputs are package-local literals,
+// so a marshal failure would be a programming error rather than a runtime
+// condition.
 func mustJSON(v any) string {
 	data, err := json.Marshal(v)
 	if err != nil {

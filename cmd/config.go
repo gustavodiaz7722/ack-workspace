@@ -15,7 +15,7 @@ import (
 //
 // The persistent flags defined on the root command (--github-user,
 // --workspace-root, --prefix, --concurrency, --token) are inherited here, so the
-// same precedence (flag > env > persisted > default) the Configuration_Manager
+// same precedence (flag > env > persisted > default) the configuration manager
 // applies elsewhere governs `config set`/`get`.
 func newConfigCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -30,12 +30,11 @@ func newConfigCommand() *cobra.Command {
 }
 
 // newConfigSetCommand builds `config set`, which persists the GitHub identity,
-// workspace root, fork prefix, and concurrency to the configuration file
-// (Requirement 2.1). It resolves the current configuration (which already
-// applies any values supplied via flags or environment with the correct
-// precedence), validates the resolved concurrency so an out-of-range value is
-// never persisted (Requirement 7.3), and saves it. The token is never written
-// to disk (Requirement 2.5) because Manager.Save excludes it.
+// workspace root, fork prefix, and concurrency to the configuration file. It
+// resolves the current configuration (which already applies any values supplied
+// via flags or environment with the correct precedence), validates the resolved
+// concurrency so an out-of-range value is never persisted, and saves it. The
+// token is never written to disk because Manager.Save excludes it.
 func newConfigSetCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set",
@@ -86,9 +85,9 @@ func newConfigGetCommand() *cobra.Command {
 	}
 }
 
-// newConfigPathCommand builds `config path`, which prints the configuration file
-// path ($HOME/.ack-workspace/config). It requires no resolution and works even
-// when no configuration file exists yet.
+// newConfigPathCommand builds `config path`, which prints the configuration
+// file path ($HOME/.ack-workspace/config). It requires no resolution and works
+// even when no configuration file exists yet.
 func newConfigPathCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "path",

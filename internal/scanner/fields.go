@@ -12,8 +12,8 @@ import (
 
 // fieldRecord is one CRD spec field as walked out of the resource's CRD: its
 // dotted path, OpenAPI type, and description. It is the structural half of a
-// candidate record, which the Indexer fuses with the generator.yaml markings and
-// the API model's documentation.
+// candidate record, which the Indexer fuses with the generator.yaml markings
+// and the API model's documentation.
 type fieldRecord struct {
 	// Path is the field's dotted path within the resource spec, in the CRD's
 	// (camelCase) naming, for example "domainValidationOptions.validationDomain".
@@ -25,8 +25,8 @@ type fieldRecord struct {
 	Description string
 }
 
-// crdSchemaNode is the recursive subset of an OpenAPI v3 schema needed to walk a
-// CRD's field tree.
+// crdSchemaNode is the recursive subset of an OpenAPI v3 schema needed to walk
+// a CRD's field tree.
 type crdSchemaNode struct {
 	Type        string                   `yaml:"type"`
 	Description string                   `yaml:"description"`
@@ -67,12 +67,12 @@ func resourceSpecSchema(repoPath, resource string) (crdSchemaNode, error) {
 	return spec, nil
 }
 
-// walkedSpecFieldRecords resolves a resource's CRD spec schema and walks it into
-// sorted field records (with the ACK-generated "<name>Ref" companion structures
-// filtered out), returning the spec schema alongside the records. Callers that
-// need to filter records against the schema shape — for example keeping only
-// string-valued fields — use this variant so they do not have to re-resolve and
-// re-parse the CRD.
+// walkedSpecFieldRecords resolves a resource's CRD spec schema and walks it
+// into sorted field records (with the ACK-generated "<name>Ref" companion
+// structures filtered out), returning the spec schema alongside the records.
+// Callers that need to filter records against the schema shape — for example
+// keeping only string-valued fields — use this variant so they do not have to
+// re-resolve and re-parse the CRD.
 func walkedSpecFieldRecords(repoPath, resource string) (crdSchemaNode, []fieldRecord, error) {
 	spec, err := resourceSpecSchema(repoPath, resource)
 	if err != nil {
@@ -85,10 +85,11 @@ func walkedSpecFieldRecords(repoPath, resource string) (crdSchemaNode, []fieldRe
 	return spec, records, nil
 }
 
-// walkFields appends a fieldRecord for every property beneath node (recursively)
-// to out. path is the dotted path to node ("" for the spec root, which is not
-// itself emitted). Array element properties extend the parent path without an
-// index segment, so a field names the attribute rather than a position.
+// walkFields appends a fieldRecord for every property beneath node
+// (recursively) to out. path is the dotted path to node ("" for the spec root,
+// which is not itself emitted). Array element properties extend the parent path
+// without an index segment, so a field names the attribute rather than a
+// position.
 func walkFields(path string, node crdSchemaNode, out *[]fieldRecord) {
 	if path != "" {
 		*out = append(*out, fieldRecord{Path: path, Type: nodeType(node), Description: node.Description})
@@ -112,11 +113,10 @@ func walkChildren(path string, node crdSchemaNode, out *[]fieldRecord) {
 // filterNonStringFields keeps only the records whose path is string-valued
 // according to stringPaths (a string leaf, or an array of strings), dropping
 // object/struct fields, arrays of objects, and non-string scalars. Both a
-// JSON/IAM policy document and a cross-resource reference (an ARN/ID/Name) are
-// always carried in a string, so string-valued fields are the only candidates
-// for the document and reference issues; dropping the rest shrinks the index and
-// removes the struct noise the agent does not care about. Nested string leaves
-// are preserved (their object containers are dropped, not the leaves).
+// cross-resource reference holds an ARN, ID, or Name, always carried in a
+// string, so string-valued fields are the only candidates and dropping the rest
+// removes pure structural noise. Nested string leaves are preserved; only their
+// object containers are dropped.
 func filterNonStringFields(records []fieldRecord, stringPaths map[string]bool) []fieldRecord {
 	out := records[:0]
 	for _, r := range records {
@@ -127,10 +127,10 @@ func filterNonStringFields(records []fieldRecord, stringPaths map[string]bool) [
 	return out
 }
 
-// stringValuedPaths returns the set of spec field paths (dotted, camelCase) that
-// hold a string value: a string-typed leaf, or an array whose element type is
-// string. It walks the same field tree as walkFields so the paths line up with
-// the field records, letting filterNonStringFields drop everything else.
+// stringValuedPaths returns the set of spec field paths (dotted, camelCase)
+// that hold a string value: a string-typed leaf, or an array whose element type
+// is string. It walks the same field tree as walkFields so the paths line up
+// with the field records, letting filterNonStringFields drop everything else.
 func stringValuedPaths(spec crdSchemaNode) map[string]bool {
 	paths := map[string]bool{}
 	collectStringPaths("", spec, paths)
@@ -265,10 +265,10 @@ type fieldMarkings struct {
 	primaryKey map[string]bool // is_primary_key
 }
 
-// loadFieldConfig returns the per-field generator.yaml markings for the resource:
-// which fields carry a references block, and which are marked is_immutable /
-// is_primary_key. All paths are lowercased for case-insensitive correlation with
-// the CRD's camelCase paths.
+// loadFieldConfig returns the per-field generator.yaml markings for the
+// resource: which fields carry a references block, and which are marked
+// is_immutable / is_primary_key. All paths are lowercased for case-insensitive
+// correlation with the CRD's camelCase paths.
 func loadFieldConfig(repoPath, resource string) (fieldMarkings, error) {
 	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))
 	if err != nil {

@@ -29,8 +29,8 @@ const (
 // against this remote's tracking ref for the same branch (see comparisonFor).
 const upstreamRemote = "upstream"
 
-// Inspector implements the Workspace_Inspector. It reports the state of every
-// Managed_Repository found under the Workspace_Root.
+// Inspector reports the state of every managed repository found under the
+// workspace root.
 //
 // Output is written to an injectable io.Writer (out) so tests can capture and
 // assert it; New defaults out to os.Stdout while NewWithWriter lets tests
@@ -39,9 +39,10 @@ const upstreamRemote = "upstream"
 // Status is READ-ONLY: it only inspects repositories and never mutates them.
 // Consequently it never records per-repository failures and always returns a
 // neutral (empty) workspace.Summary, so Summary.HasFailures() is false and the
-// command's exit code is success unless a pre-flight error occurs (the exit-code
-// mapping itself lives in the CLI layer). The returned error is non-nil only for
-// a pre-flight failure such as being unable to read the Workspace_Root.
+// command's exit code is success unless a pre-flight error occurs (the
+// exit-code mapping itself lives in the CLI layer). The returned error is
+// non-nil only for a pre-flight failure such as being unable to read the
+// workspace root.
 type Inspector struct {
 	// out is where rendered status (table or JSON) is written. It defaults to
 	// os.Stdout and is injectable for testing.
@@ -55,25 +56,24 @@ func New() *Inspector { return &Inspector{out: os.Stdout} }
 // tests that capture and assert the rendered output.
 func NewWithWriter(out io.Writer) *Inspector { return &Inspector{out: out} }
 
-// Status lists each Managed_Repository found directly under the Workspace_Root,
+// Status lists each managed repository found directly under the workspace root,
 // ordered alphabetically by directory name, and reports each repository's
 // branch (or detached-HEAD state), its ahead/behind/up-to-date comparison
-// against the upstream default branch, and whether its working tree is dirty
-// (Requirement 6).
+// against that branch's upstream counterpart, and whether its working tree is
+// dirty.
 //
 // When no managed repository is found it emits a friendly message (or an empty
-// JSON array when jsonOut is true) and returns without error (Requirement 6.7).
-// When jsonOut is true the entire status set is emitted as a single JSON
-// document — an array of StatusEntry values (Requirement 6.8); otherwise a
-// human-readable table is printed.
+// JSON array when jsonOut is true) and returns without error. When jsonOut is
+// true the entire status set is emitted as a single JSON document — an array of
+// StatusEntry values; otherwise a human-readable table is printed.
 //
 // Status is read-only: it returns a neutral, empty Summary (see the type doc).
 func (in *Inspector) Status(ctx context.Context, a app.App, jsonOut bool) (workspace.Summary, error) {
 	root := a.Config.WorkspaceRoot
 
-	// Requirement 6.1: list repositories directly under the Workspace_Root,
-	// already returned sorted alphabetically by directory name. A missing root
-	// is treated by Discover as an empty workspace (nil error).
+	// list repositories directly under the workspace root, already returned sorted
+	// alphabetically by directory name. A missing root is treated by Discover as
+	// an empty workspace (nil error).
 	repos, err := workspace.Discover(root)
 	if err != nil {
 		// Pre-flight failure (e.g. the root is unreadable). Surface it so the CLI
@@ -81,8 +81,8 @@ func (in *Inspector) Status(ctx context.Context, a app.App, jsonOut bool) (works
 		return workspace.Summary{}, fmt.Errorf("discovering repositories under %q: %w", root, err)
 	}
 
-	// Requirement 6.7: no managed repositories. Emit a friendly message (or an
-	// empty JSON array in machine-readable mode) and exit without error.
+	// no managed repositories. Emit a friendly message (or an empty JSON array in
+	// machine-readable mode) and exit without error.
 	if len(repos) == 0 {
 		if jsonOut {
 			in.renderJSON([]workspace.StatusEntry{})
@@ -107,40 +107,40 @@ func (in *Inspector) Status(ctx context.Context, a app.App, jsonOut bool) (works
 		in.renderTable(entries)
 	}
 
-	// Status records no Results: it is read-only and never contributes to the
-	// exit code (see the type doc).
+	// Status records no Results: it is read-only and never contributes to the exit
+	// code (see the type doc).
 	return workspace.Summary{}, nil
 }
 
 // inspect builds the StatusEntry for a single repository. It is resilient: any
 // inspection problem degrades that field gracefully (an undeterminable
-// comparison becomes "unavailable", Requirement 6.6) rather than aborting the
-// listing, so the remaining repositories are always reported.
+// comparison becomes "unavailable") rather than aborting the listing, so the
+// remaining repositories are always reported.
 func (in *Inspector) inspect(ctx context.Context, repo *git.Repo, name string) workspace.StatusEntry {
 	entry := workspace.StatusEntry{Repo: name}
 
-	// Requirements 6.2, 6.3: report the checked-out branch, or that the
-	// repository is in a detached HEAD state.
+	// report the checked-out branch, or that the repository is in a detached HEAD
+	// state.
 	branch, detached, err := repo.CurrentBranch(ctx)
 	switch {
 	case err != nil:
-		// Branch could not be determined; leave Branch empty and mark the
-		// comparison unavailable since there is no local branch to compare.
+		// Branch could not be determined; leave Branch empty and mark the comparison
+		// unavailable since there is no local branch to compare.
 		entry.Comparison = comparisonUnavailable
 	case detached:
-		// Requirement 6.3: detached HEAD — no branch name, and with no current
-		// branch the upstream comparison is unavailable (Requirement 6.6).
+		// detached HEAD — no branch name, and with no current branch the upstream
+		// comparison is unavailable.
 		entry.Detached = true
 		entry.Comparison = comparisonUnavailable
 	default:
 		entry.Branch = branch
-		// Requirements 6.4, 6.6: compare the local branch to its upstream
-		// tracking ref and classify the relationship.
+		// compare the local branch to its upstream tracking ref and classify the
+		// relationship.
 		in.fillComparison(ctx, repo, branch, &entry)
 	}
 
-	// Requirement 6.5: report whether the working tree is dirty. A read error
-	// here leaves Dirty at its zero value (false) rather than failing the listing.
+	// report whether the working tree is dirty. A read error here leaves Dirty at
+	// its zero value (false) rather than failing the listing.
 	if dirty, derr := repo.IsDirty(ctx); derr == nil {
 		entry.Dirty = dirty
 	}
@@ -155,10 +155,9 @@ func (in *Inspector) inspect(ctx context.Context, repo *git.Repo, name string) w
 // the same branch on the "upstream" remote. AheadBehind reports how many
 // commits the local branch is ahead of and behind that ref.
 //
-// Requirement 6.6: if the comparison cannot be determined (for example the
-// upstream remote or its branch ref is not present locally, which makes
-// AheadBehind fail), the comparison is recorded as "unavailable" and listing
-// continues.
+// if the comparison cannot be determined (for example the upstream remote or
+// its branch ref is not present locally, which makes AheadBehind fail), the
+// comparison is recorded as "unavailable" and listing continues.
 //
 // When both ahead and behind counts are non-zero (a diverged branch), the
 // comparison is classified as "behind" so the table flags that upstream has
@@ -184,8 +183,8 @@ func (in *Inspector) fillComparison(ctx context.Context, repo *git.Repo, branch 
 }
 
 // renderJSON writes the entries as a single, indented JSON document (an array)
-// to the Inspector's writer (Requirement 6.8). A nil or empty slice is rendered
-// as "[]" rather than "null" because entries is always a non-nil slice.
+// to the Inspector's writer. A nil or empty slice is rendered as "[]" rather
+// than "null" because entries is always a non-nil slice.
 func (in *Inspector) renderJSON(entries []workspace.StatusEntry) {
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
@@ -209,7 +208,7 @@ func (in *Inspector) renderTable(entries []workspace.StatusEntry) {
 }
 
 // branchText renders the branch column: the branch name, or "(detached HEAD)"
-// when the repository is in a detached HEAD state (Requirement 6.3).
+// when the repository is in a detached HEAD state.
 func branchText(e workspace.StatusEntry) string {
 	if e.Detached {
 		return "(detached HEAD)"
@@ -218,8 +217,7 @@ func branchText(e workspace.StatusEntry) string {
 }
 
 // statusText renders the comparison column from the entry's Comparison and
-// counts (Requirement 6.4), or "unavailable" when the comparison could not be
-// determined (Requirement 6.6).
+// counts, or "unavailable" when the comparison could not be determined.
 func statusText(e workspace.StatusEntry) string {
 	switch e.Comparison {
 	case comparisonUpToDate:
@@ -233,7 +231,7 @@ func statusText(e workspace.StatusEntry) string {
 	}
 }
 
-// workingTreeText renders the dirty column (Requirement 6.5).
+// workingTreeText renders the dirty column.
 func workingTreeText(dirty bool) string {
 	if dirty {
 		return "dirty"

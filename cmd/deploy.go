@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	// flagNamespace overrides the Kubernetes namespace the controller is
-	// installed into (default "ack-system").
+	// flagNamespace overrides the Kubernetes namespace the controller is installed
+	// into (default "ack-system").
 	flagNamespace = "namespace"
 	// flagImageTag overrides the tag applied to the built image (default the
 	// controller's checked-out HEAD short SHA).
@@ -30,31 +30,32 @@ const (
 	flagClusterPolicyARN = "cluster-policy-arn"
 )
 
-// newDeployCommand builds the `deploy` subcommand, which builds a single service
-// controller from its local implementation branch and deploys it to the shared
-// development cluster: it resolves the caller's AWS account, brings that cluster
-// into existence when it is absent and repoints the local kubeconfig at it,
-// ensures an ECR repository for the controller exists (creating it when absent),
-// builds the controller image from the checked-out source with the
-// code-generator's build-controller-image.sh script, pushes the image to ECR, and
-// installs or upgrades the controller's Helm chart on that cluster pointing at
-// the freshly built image.
+// newDeployCommand builds the `deploy` subcommand, which builds a single
+// service controller from its local checkout and deploys it to the
+// shared development cluster: it resolves the caller's AWS account, brings that
+// cluster into existence when it is absent and repoints the local kubeconfig at
+// it, ensures an ECR repository for the controller exists (creating it when
+// absent), builds the controller image from the checked-out source with the
+// code-generator's build-controller-image.sh script, pushes the image to ECR,
+// and installs or upgrades the controller's Helm chart on that cluster pointing
+// at the freshly built image.
 //
-// The cluster is fixed rather than selectable, and the current kubeconfig context
-// is never used as-is, so a deploy cannot land on an unintended cluster.
+// The cluster is fixed rather than selectable, and the current kubeconfig
+// context is never used as-is, so a deploy cannot land on an unintended
+// cluster.
 //
 // deploy reads the controller's checked-out HEAD to tag the image, so it
 // declares the git prerequisite. It does not fork, clone, push to GitHub, or
-// open a pull request, so it needs no GitHub token or identity. The docker, aws,
-// kubectl, and helm executables must be available at runtime; a missing tool is
-// reported as a failed Result. The empty-service case is enforced by the
-// Controller_Deployer, which returns a *deployer.UsageError so the rule lives in
-// one place and maps to a usage exit code.
+// open a pull request, so it needs no GitHub token or identity. The docker,
+// aws, kubectl, and helm executables must be available at runtime; a missing
+// tool is reported as a failed Result. The empty-service case is enforced by
+// the deployer, which returns a *deployer.UsageError so the rule lives in one
+// place and maps to a usage exit code.
 func newDeployCommand(d deps, res *Result) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deploy <service>",
 		Short: "Build a controller from local source and deploy it to the development cluster",
-		Long: "deploy builds a single service controller from its local implementation branch and " +
+		Long: "deploy builds a single service controller from its local checkout and " +
 			"deploys it to the shared ACK development cluster (" + deployer.ClusterName + "). It " +
 			"resolves your AWS account and region from the active credentials, brings the cluster into " +
 			"existence when it is absent, ensures an ECR repository for the controller exists " +
@@ -102,9 +103,8 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			clusterVersion, _ := cmd.Flags().GetString(flagClusterVersion)
 			policyARNs, _ := cmd.Flags().GetStringSlice(flagClusterPolicyARN)
 
-			// A missing service identifier is validated by the Controller_Deployer
-			// (which returns a *deployer.UsageError) so the rule is enforced in a
-			// single place.
+			// A missing service identifier is validated by the deployer (which returns a
+			// *deployer.UsageError) so the rule is enforced in a single place.
 			var service string
 			if len(args) > 0 {
 				service = args[0]

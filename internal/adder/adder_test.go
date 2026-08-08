@@ -44,22 +44,22 @@ func resultsByRepo(s workspace.Summary) map[string]workspace.Result {
 	return out
 }
 
-// markUpstreamPresent registers the given upstream "<alias>-controller" repos as
-// existing in the organization.
+// markUpstreamPresent registers the given upstream "<alias>-controller" repos
+// as existing in the organization.
 func markUpstreamPresent(m *githubclient.Mock, names ...string) {
 	for _, name := range names {
 		m.SetRepo(githubclient.RepoRef{Owner: upstreamOwner, Name: name}, githubclient.RepoState{Exists: true})
 	}
 }
 
-// markForkPresent registers the fork "<prefix><name>" as existing under the test
-// user so the flow does not create it.
+// markForkPresent registers the fork "<prefix><name>" as existing under the
+// test user so the flow does not create it.
 func markForkPresent(m *githubclient.Mock, name string) {
 	m.SetRepo(githubclient.RepoRef{Owner: testUser, Name: testPrefix + name}, githubclient.RepoState{Exists: true})
 }
 
-// TestAdd_EmptyListGuard verifies Requirement 4.2: an empty identifier list is
-// rejected before any change, with no filesystem or client side effects.
+// TestAdd_EmptyListGuard verifies that an empty identifier list is rejected
+// before any change, with no filesystem or client side effects.
 func TestAdd_EmptyListGuard(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
@@ -92,9 +92,9 @@ func TestAdd_EmptyListGuard(t *testing.T) {
 	}
 }
 
-// TestAdd_NormalizationBareAndFullForm verifies Requirement 4.1: both the bare
-// alias and the full "<alias>-controller" form resolve to "<alias>-controller"
-// and produce the fork name "<prefix><alias>-controller".
+// TestAdd_NormalizationBareAndFullForm verifies that both the bare alias and
+// the full "<alias>-controller" form resolve to "<alias>-controller" and
+// produce the fork name "<prefix><alias>-controller".
 func TestAdd_NormalizationBareAndFullForm(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
@@ -149,9 +149,9 @@ func TestAdd_NormalizationBareAndFullForm(t *testing.T) {
 	}
 }
 
-// TestAdd_ResolutionFailureContinues verifies Requirement 4.3: a not-found repo
-// and an API error both record the identifier as failed while the batch
-// continues processing the remaining identifiers.
+// TestAdd_ResolutionFailureContinues verifies that a not-found repo and an API
+// error both record the identifier as failed while the batch continues
+// processing the remaining identifiers.
 func TestAdd_ResolutionFailureContinues(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
@@ -196,9 +196,8 @@ func TestAdd_ResolutionFailureContinues(t *testing.T) {
 	}
 }
 
-// TestAdd_ForkCreateFailure verifies Requirement 4.5: a fork-create failure
-// records the identifier as failed and the batch continues; no clone is
-// attempted for it.
+// TestAdd_ForkCreateFailure verifies that a fork-create failure records the
+// identifier as failed and the batch continues; no clone is attempted for it.
 func TestAdd_ForkCreateFailure(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
@@ -221,9 +220,9 @@ func TestAdd_ForkCreateFailure(t *testing.T) {
 	}
 }
 
-// TestAdd_SkipExistingDirectory verifies Requirement 4.7: an existing local
-// directory is skipped (recorded as already present), the clone is not
-// attempted, and the pre-existing directory is never removed.
+// TestAdd_SkipExistingDirectory verifies that an existing local directory is
+// skipped (recorded as already present), the clone is not attempted, and the
+// pre-existing directory is never removed.
 func TestAdd_SkipExistingDirectory(t *testing.T) {
 	root := t.TempDir()
 	existing := filepath.Join(root, "s3-controller")
@@ -255,18 +254,18 @@ func TestAdd_SkipExistingDirectory(t *testing.T) {
 	}
 }
 
-// TestAdd_RemoteConfigFailureCleansUp verifies Requirement 4.8: when configuring
-// a remote fails after a clone, the run-created directory is removed and the
-// identifier is recorded as failed.
+// TestAdd_RemoteConfigFailureCleansUp verifies that when configuring a remote
+// fails after a clone, the run-created directory is removed and the identifier
+// is recorded as failed.
 func TestAdd_RemoteConfigFailureCleansUp(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
 	markUpstreamPresent(gh, "s3-controller")
 	markForkPresent(gh, "s3-controller")
 
-	// Clone succeeds (creating the directory) but configuring a remote fails.
-	// Both `remote set-url` and the `remote add` fallback fail, so SetRemote
-	// returns an error and the cloned directory must be removed.
+	// Clone succeeds (creating the directory) but configuring a remote fails. Both
+	// `remote set-url` and the `remote add` fallback fail, so SetRemote returns an
+	// error and the cloned directory must be removed.
 	runner := &git.MockRunner{}
 	runner.ResponseFunc = func(_ string, args []string) (string, error) {
 		if len(args) == 0 {
@@ -297,8 +296,8 @@ func TestAdd_RemoteConfigFailureCleansUp(t *testing.T) {
 	}
 }
 
-// TestAdd_SuccessConfiguresRemotes verifies Requirement 4.6: a successful add
-// clones the fork and configures both origin and upstream remotes.
+// TestAdd_SuccessConfiguresRemotes verifies that a successful add clones the
+// fork and configures both origin and upstream remotes.
 func TestAdd_SuccessConfiguresRemotes(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
@@ -368,9 +367,9 @@ func assertNoMutatingGitCalls(t *testing.T, runner *git.MockRunner) {
 	}
 }
 
-// TestAdd_DryRunForkPresentPreview verifies Requirements 8.4/8.5 and Property 6:
-// with the fork present, dry-run previews "would clone existing fork" using only
-// read-only operations and invokes no CreateFork and no mutating git command.
+// TestAdd_DryRunForkPresentPreview verifies that with the fork present, dry-run
+// previews "would clone existing fork" using only read-only operations and
+// invokes no CreateFork and no mutating git command.
 func TestAdd_DryRunForkPresentPreview(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
@@ -480,8 +479,8 @@ func TestAdd_DryRunResolutionFailureStillReported(t *testing.T) {
 func TestAdd_AllExpandsToOrgControllers(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
-	// The org contains two controllers plus several non-controller repos that
-	// must be filtered out by the "<alias>-controller" naming convention.
+	// The org contains two controllers plus several non-controller repos that must
+	// be filtered out by the "<alias>-controller" naming convention.
 	gh.SetOrgRepos(upstreamOwner,
 		"runtime", "code-generator", "test-infra", "community",
 		"s3-controller", "sns-controller")

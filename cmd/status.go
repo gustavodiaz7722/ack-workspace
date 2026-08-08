@@ -6,19 +6,17 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
 )
 
-// flagJSON is the `status` flag that requests machine-readable JSON output
-// (Requirement 6.8).
+// flagJSON is the `status` flag that requests machine-readable JSON output.
 const flagJSON = "json"
 
 // newStatusCommand builds the `status` subcommand, which reports the state of
-// every Managed_Repository under the workspace root.
+// every managed repository under the workspace root.
 //
-// status reads local git state only; it declares the git prerequisite
-// (Requirements 1.1, 1.7) and needs neither a token nor an identity. The
-// Workspace_Inspector renders its own output (a table, or a single JSON
-// document with --json) to the command's stdout, so it is capturable in tests.
-// status is read-only and records no failures, so the Result it stashes never
-// drives a non-zero exit code.
+// status reads local git state only; it declares the git prerequisite and needs
+// neither a token nor an identity. The inspector renders its own output (a
+// table, or a single JSON document with --json) to the command's stdout, so it
+// is capturable in tests. status is read-only and records no failures, so the
+// Result it stashes never drives a non-zero exit code.
 func newStatusCommand(d deps, res *Result) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",

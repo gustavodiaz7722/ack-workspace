@@ -17,15 +17,15 @@ const (
 
 // newCandidatesCommand builds the `candidates` subcommand, which emits the
 // deterministic cross-resource-reference candidate index for a resource: every
-// string-valued CRD spec field, fused with the generator.yaml markings that bear
-// on whether it is a reference and with the API model's documentation and
+// string-valued CRD spec field, fused with the generator.yaml markings that
+// bear on whether it is a reference and with the API model's documentation and
 // validation patterns.
 //
-// This is the mechanical narrowing step of a reference audit, separated from the
-// judgment about which candidates are genuine references: it produces the field
-// set a reviewer decides over, so an audit can be split across independent
-// reviewers who all start from identical input, and so two runs over an
-// unchanged repo produce the same set.
+// This is the mechanical narrowing step of a reference audit, separated from
+// the judgment about which candidates are genuine references: it produces the
+// field set a reviewer decides over, so an audit can be split across
+// independent reviewers who all start from identical input, and so two runs
+// over an unchanged repo produce the same set.
 //
 // It reads the CRDs and generator.yaml locally and fetches the service's Smithy
 // model over HTTP, so it needs no AWS credentials, git, or GitHub identity.

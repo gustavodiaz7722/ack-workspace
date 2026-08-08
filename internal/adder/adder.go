@@ -1,10 +1,9 @@
-// Package adder implements the Controller_Adder, which forks, clones, and
-// configures Service_Controller_Repositories named for arbitrary service
-// identifiers.
+// Package adder forks, clones, and configures the service controller
+// repositories named by arbitrary service identifiers.
 //
-// It mirrors the Workspace_Initializer's per-repository fork/clone/configure
-// machinery (see internal/initializer) but operates on caller-supplied service
-// identifiers instead of the fixed set of Common_Repositories. The small file
+// It mirrors the initializer's per-repository fork/clone/configure machinery
+// (see internal/initializer) but operates on caller-supplied service
+// identifiers instead of the fixed set of core repositories. The small file
 // helpers (dirExists, removeRunCreated, repoURL) and the upstreamOwner constant
 // are replicated locally rather than imported from the initializer package to
 // avoid coupling the two components.
@@ -29,20 +28,21 @@ import (
 // ACK repositories.
 const upstreamOwner = "aws-controllers-k8s"
 
-// controllerSuffix is the conventional suffix of every Service_Controller_Repository
-// name. A bare Service_Alias (for example "s3") and its full form
+// controllerSuffix is the conventional suffix of every service controller
+// repository name. A bare service alias (for example "s3") and its full form
 // ("s3-controller") both normalize to the same repository.
 const controllerSuffix = "-controller"
 
-// allToken is the special identifier that expands to every Service_Controller_Repository
-// available in the Upstream_Organization. It is matched case-insensitively. When
-// present anywhere in the identifier list it supersedes the other identifiers.
+// allToken is the special identifier that expands to every service controller
+// repository available in the upstream organization. It is matched
+// case-insensitively. When present anywhere in the identifier list it
+// supersedes the other identifiers.
 const allToken = "all"
 
 // UsageError is a typed argument/validation error returned by Add before any
 // repository is processed. The cmd layer maps it to a distinct non-zero exit
-// code (Requirement 4.2). It is deliberately distinct from per-repository
-// failures, which are recorded as failed Results in the Summary instead.
+// code. It is deliberately distinct from per-repository failures, which are
+// recorded as failed Results in the Summary instead.
 type UsageError struct {
 	// Msg is the human-readable validation message.
 	Msg string
@@ -51,9 +51,9 @@ type UsageError struct {
 // Error implements error.
 func (e *UsageError) Error() string { return e.Msg }
 
-// Adder implements the Controller_Adder. It forks, clones, and configures the
-// Service_Controller_Repository for each supplied identifier, reporting an
-// exhaustive, mutually-exclusive added/skipped/failed summary.
+// Adder forks, clones, and configures the service controller repository for
+// each supplied identifier, reporting an exhaustive, mutually-exclusive
+// added/skipped/failed summary.
 type Adder struct{}
 
 // New returns a ready-to-use Adder.
@@ -61,23 +61,22 @@ func New() *Adder { return &Adder{} }
 
 // Add processes each supplied service identifier independently and returns a
 // Summary in which every processed identifier is recorded in exactly one of the
-// added (OutcomeCreated), skipped, or failed buckets (Requirement 4).
+// added (OutcomeCreated), skipped, or failed buckets.
 //
 // The returned error is non-nil only for the pre-flight rejection of an empty
-// identifier list (Requirement 4.2); in that case no modification is made under
-// the Workspace_Root and the Summary is empty. All per-identifier problems are
-// captured as failed Results and never surface as the returned error
-// (Requirements 4.3, 4.5, 4.8; Property 3).
+// identifier list; in that case no modification is made under the workspace
+// root and the Summary is empty. All per-identifier problems are captured as
+// failed Results and never surface as the returned error.
 func (a *Adder) Add(ctx context.Context, ap app.App, identifiers []string) (workspace.Summary, error) {
-	// Requirement 4.2: reject an empty identifier list before making any change
-	// under the Workspace_Root.
+	// reject an empty identifier list before making any change under the workspace
+	// root.
 	if len(identifiers) == 0 {
 		return workspace.Summary{}, &UsageError{Msg: "at least one service identifier is required"}
 	}
 
-	// Expand the special "all" identifier to every Service_Controller_Repository
-	// available in the Upstream_Organization. This is done before any change is
-	// made under the Workspace_Root; a discovery failure aborts the command
+	// Expand the special "all" identifier to every service controller repository
+	// available in the upstream organization. This is done before any change is
+	// made under the workspace root; a discovery failure aborts the command
 	// without side effects.
 	identifiers, err := a.expand(ctx, ap, identifiers)
 	if err != nil {
@@ -86,9 +85,9 @@ func (a *Adder) Add(ctx context.Context, ap app.App, identifiers []string) (work
 
 	root := ap.Config.WorkspaceRoot
 
-	// Requirement 4.1 / 7: build one task per identifier and run them with the
-	// configured bounded concurrency. Each task processes its identifier
-	// independently and never aborts the batch on failure.
+	// build one task per identifier and run them with the configured bounded
+	// concurrency. Each task processes its identifier independently and never
+	// aborts the batch on failure.
 	tasks := make([]engine.Task, 0, len(identifiers))
 	for _, identifier := range identifiers {
 		identifier := identifier
@@ -103,15 +102,15 @@ func (a *Adder) Add(ctx context.Context, ap app.App, identifiers []string) (work
 
 // expand resolves the supplied identifiers into the concrete list to process.
 // When the special "all" token (case-insensitive) appears anywhere in the list
-// it supersedes the other identifiers: every Service_Controller_Repository in
-// the Upstream_Organization is discovered via the GitHub_Client, filtered to the
-// "<alias>-controller" naming convention, de-duplicated, and returned sorted.
-// Otherwise the identifiers are returned unchanged.
+// it supersedes the other identifiers: every service controller repository in
+// the upstream organization is discovered via the GitHub client, filtered to
+// the "<alias>-controller" naming convention, de-duplicated, and returned
+// sorted. Otherwise the identifiers are returned unchanged.
 //
-// A discovery (listing) failure is returned as the function error so the command
-// fails fast without touching the Workspace_Root; finding no controllers is
-// reported as a *UsageError so the caller exits with a usage code rather than
-// silently doing nothing.
+// A discovery (listing) failure is returned as the function error so the
+// command fails fast without touching the workspace root; finding no
+// controllers is reported as a *UsageError so the caller exits with a usage
+// code rather than silently doing nothing.
 func (a *Adder) expand(ctx context.Context, ap app.App, identifiers []string) ([]string, error) {
 	if !containsAll(identifiers) {
 		return identifiers, nil
@@ -154,11 +153,11 @@ func containsAll(identifiers []string) bool {
 }
 
 // processIdentifier normalizes a single identifier and runs the
-// fork/clone/configure flow for the resolved Service_Controller_Repository.
+// fork/clone/configure flow for the resolved service controller repository.
 //
-// Requirement 4.1: leading/trailing whitespace is trimmed and both the bare
-// Service_Alias and the full "<alias>-controller" form normalize to the same
-// repository named "<alias>-controller".
+// leading/trailing whitespace is trimmed and both the bare service alias and
+// the full "<alias>-controller" form normalize to the same repository named
+// "<alias>-controller".
 func (a *Adder) processIdentifier(ctx context.Context, ap app.App, identifier, root string) workspace.Result {
 	alias := strings.TrimSuffix(strings.TrimSpace(identifier), controllerSuffix)
 	if alias == "" {
@@ -173,8 +172,8 @@ func (a *Adder) processIdentifier(ctx context.Context, ap app.App, identifier, r
 	return a.process(ctx, ap, a.specFor(ap, alias, root))
 }
 
-// specFor builds the RepoSpec for a normalized Service_Alias: the upstream lives
-// under the ACK organization as "<alias>-controller", the fork is named
+// specFor builds the RepoSpec for a normalized service alias: the upstream
+// lives under the ACK organization as "<alias>-controller", the fork is named
 // "<prefix><alias>-controller" under the contributor's account, and the local
 // checkout uses the unprefixed "<alias>-controller" name so it matches the
 // conventional ACK Go import path.
@@ -190,17 +189,16 @@ func (a *Adder) specFor(ap app.App, alias, root string) workspace.RepoSpec {
 }
 
 // process runs the resolve/fork/clone/configure flow for a single resolved
-// Service_Controller_Repository and returns its terminal Result. It never
-// returns an error out-of-band: every failure is captured into a failed Result
-// so the engine continues processing the remaining identifiers (Requirements
-// 4.3, 4.5, 4.8; Property 3).
+// controller repository and returns its terminal Result. It never returns an
+// error out-of-band: every failure is captured into a failed Result so the
+// engine continues processing the remaining identifiers.
 func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec) workspace.Result {
 	upstreamRef := githubclient.RepoRef{Owner: spec.UpstreamOwner, Name: spec.UpstreamName}
 	forkRef := githubclient.RepoRef{Owner: spec.ForkOwner, Name: spec.ForkName}
 
-	// Requirement 4.3: resolve the repository's existence against the
-	// organization. A not-found result or an API error both record the
-	// identifier as failed and let the batch continue.
+	// resolve the repository's existence against the organization. A not-found
+	// result or an API error both record the identifier as failed and let the
+	// batch continue.
 	exists, err := ap.GitHub.RepoExists(ctx, upstreamRef)
 	if err != nil {
 		return failed(spec, fmt.Errorf("resolving %s: %w", upstreamRef, err))
@@ -209,18 +207,17 @@ func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec
 		return failed(spec, fmt.Errorf("service controller repository %s does not exist", upstreamRef))
 	}
 
-	// Requirements 4.4, 4.5: ensure the fork exists, creating it when missing;
-	// a fork-create failure records the identifier as failed and continues.
+	// ensure the fork exists, creating it when missing; a fork-create failure
+	// records the identifier as failed and continues.
 	forkExists, err := ap.GitHub.RepoExists(ctx, forkRef)
 	if err != nil {
 		return failed(spec, fmt.Errorf("checking fork %s: %w", forkRef, err))
 	}
 
-	// Dry-run (Requirements 8.4, 8.5; Property 6): the decision is fully
-	// determined from read-only inspection alone (upstream exists, whether the
-	// fork exists, and whether the local directory is present). Report the
-	// action that would be taken and return without invoking any mutating
-	// operation (CreateFork, Clone, SetRemote).
+	// Dry-run: the decision is fully determined from read-only inspection alone
+	// (upstream exists, whether the fork exists, and whether the local directory
+	// is present). Report the action that would be taken and return without
+	// invoking any mutating operation (CreateFork, Clone, SetRemote).
 	if ap.DryRun {
 		if dirExists(spec.LocalPath) {
 			return workspace.Result{
@@ -246,10 +243,9 @@ func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec
 		}
 	}
 
-	// Requirement 4.7: if the local directory already exists, skip cloning
-	// regardless of its contents and record it as already present. This check
-	// runs before the clone so failure cleanup never touches a pre-existing
-	// directory (Property 7).
+	// if the local directory already exists, skip cloning regardless of its
+	// contents and record it as already present. This check runs before the clone
+	// so failure cleanup never touches a pre-existing directory.
 	if dirExists(spec.LocalPath) {
 		return workspace.Result{
 			Repo:    spec.UpstreamName,
@@ -258,8 +254,8 @@ func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec
 		}
 	}
 
-	// Requirement 4.6: clone the fork into the local path; on failure remove any
-	// partially created directory and record the identifier failed.
+	// clone the fork into the local path; on failure remove any partially created
+	// directory and record the identifier failed.
 	forkURL := repoURL(spec.ForkOwner, spec.ForkName)
 	repo, err := git.Clone(ctx, ap.Git, forkURL, spec.LocalPath)
 	if err != nil {
@@ -267,8 +263,8 @@ func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec
 		return failed(spec, fmt.Errorf("cloning fork %s: %w", forkRef, err))
 	}
 
-	// Requirements 4.6, 4.8: configure origin -> fork and upstream -> org; on
-	// failure remove the cloned directory and record the identifier failed.
+	// configure origin -> fork and upstream -> org; on failure remove the cloned
+	// directory and record the identifier failed.
 	if err := repo.SetRemote(ctx, "origin", forkURL); err != nil {
 		removeRunCreated(spec.LocalPath)
 		return failed(spec, fmt.Errorf("configuring origin remote: %w", err))
@@ -279,7 +275,7 @@ func (a *Adder) process(ctx context.Context, ap app.App, spec workspace.RepoSpec
 		return failed(spec, fmt.Errorf("configuring upstream remote: %w", err))
 	}
 
-	// Requirement 4.6: record the repository as added (OutcomeCreated) on success.
+	// record the repository as added (OutcomeCreated) on success.
 	return workspace.Result{
 		Repo:    spec.UpstreamName,
 		Outcome: workspace.OutcomeCreated,
@@ -304,7 +300,7 @@ func repoURL(owner, name string) string {
 
 // dirExists reports whether path exists as a directory entry. Any stat result
 // without an error is treated as "exists" so that a pre-existing repository
-// directory is skipped (Requirement 4.7) and never removed by cleanup.
+// directory is skipped and never removed by cleanup.
 func dirExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -313,7 +309,7 @@ func dirExists(path string) bool {
 // removeRunCreated removes a directory the current run created during failure
 // cleanup. It is only ever called for a LocalPath that did not exist when
 // processing began (the pre-existing case is handled by the skipped branch
-// above), so it never deletes a directory the tool did not create (Property 7).
+// above), so it never deletes a directory the tool did not create.
 func removeRunCreated(path string) {
 	_ = os.RemoveAll(path)
 }

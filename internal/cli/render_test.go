@@ -44,7 +44,7 @@ func TestRenderSummary_AddedLabel(t *testing.T) {
 	}
 	out := buf.String()
 
-	// The created bucket is relabeled "added" in the header (Requirement 4.9).
+	// The created bucket is relabeled "added" in the header.
 	if !strings.Contains(out, "added: 1, skipped: 1, failed: 1") {
 		t.Errorf("output missing relabeled count header.\n%s", out)
 	}

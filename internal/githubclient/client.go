@@ -1,6 +1,7 @@
 // Package githubclient defines the GitHubClient interface and its go-github
-// adapter and mock. It performs GitHub API operations: resolving repository
-// existence and metadata, detecting existing forks, and creating forks.
+// adapter and mock: resolving repository existence and metadata, creating and
+// deleting forks, listing an organization's repositories, opening pull
+// requests, and syncing a fork from upstream.
 package githubclient
 
 import (
@@ -25,12 +26,11 @@ func (r RepoRef) String() string {
 	return r.Owner + "/" + r.Name
 }
 
-// GitHubClient performs the GitHub API operations needed by ack-workspace:
-// resolving repository existence and metadata, and creating forks.
+// GitHubClient performs the GitHub API operations ack-workspace needs.
 type GitHubClient interface {
-	// RepoExists reports whether owner/name resolves to an existing repository.
-	// It distinguishes a "not found" result (false, nil) from transport or API
-	// errors (false, err).
+	// RepoExists reports whether owner/name resolves to an existing repository. It
+	// distinguishes a "not found" result (false, nil) from transport or API errors
+	// (false, err).
 	RepoExists(ctx context.Context, ref RepoRef) (bool, error)
 	// DefaultBranch returns the default branch name of the referenced repository
 	// (for example, "main").
@@ -45,9 +45,9 @@ type GitHubClient interface {
 	// configured timeout, so callers can record the repository as failed rather
 	// than surfacing a clone error.
 	CreateFork(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error)
-	// ListOrgRepos returns the names of the non-archived repositories in the
-	// given organization, following pagination. Archived repositories are
-	// excluded because they are not useful contributor targets.
+	// ListOrgRepos returns the names of the non-archived repositories in the given
+	// organization, following pagination. Archived repositories are excluded
+	// because they are not useful contributor targets.
 	ListOrgRepos(ctx context.Context, org string) ([]string, error)
 	// DeleteRepo permanently deletes the referenced repository. It is used to
 	// delete a contributor's fork; callers must never pass an upstream
@@ -59,9 +59,9 @@ type GitHubClient interface {
 	CreatePullRequest(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error)
 	// SyncFork updates the given branch of the fork (fork) from its upstream
 	// repository server-side, equivalent to the "Sync fork" button in the GitHub
-	// UI. It returns a *ForkDivergedError when the branch cannot be synced
-	// because it has diverged from upstream (the API responds 409), so callers
-	// can report a clear, actionable result rather than a generic error.
+	// UI. It returns a *ForkDivergedError when the branch cannot be synced because
+	// it has diverged from upstream (the API responds 409), so callers can report
+	// a clear, actionable result rather than a generic error.
 	SyncFork(ctx context.Context, fork RepoRef, branch string) error
 }
 
@@ -74,8 +74,8 @@ type NewPullRequest struct {
 	// Head is the branch the changes live on. For a pull request opened from a
 	// fork it must be namespaced "<fork-owner>:<branch>".
 	Head string
-	// Base is the branch on the upstream repository the changes should merge
-	// into (for example "main").
+	// Base is the branch on the upstream repository the changes should merge into
+	// (for example "main").
 	Base string
 }
 
@@ -226,8 +226,8 @@ func (a *Adapter) DeleteRepo(ctx context.Context, ref RepoRef) error {
 	return nil
 }
 
-// CreatePullRequest opens a pull request on upstream and returns the HTML URL of
-// the created PR.
+// CreatePullRequest opens a pull request on upstream and returns the HTML URL
+// of the created PR.
 func (a *Adapter) CreatePullRequest(ctx context.Context, upstream RepoRef, in NewPullRequest) (string, error) {
 	pr, _, err := a.rest.PullRequests.Create(ctx, upstream.Owner, upstream.Name, &github.NewPullRequest{
 		Title: github.String(in.Title),
@@ -270,10 +270,10 @@ func (a *Adapter) DefaultBranch(ctx context.Context, ref RepoRef) (string, error
 // CreateFork issues the fork request and then polls for the fork to become
 // queryable, returning a *ForkTimeoutError if it does not appear in time.
 func (a *Adapter) CreateFork(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error) {
-	// DefaultBranchOnly copies only the upstream default branch into the fork;
-	// no other branches or tags are copied. This keeps the fork clean of
-	// upstream release tags (which would otherwise be frozen at fork-creation
-	// time and never sync), so tags live only on upstream and the local clone.
+	// DefaultBranchOnly copies only the upstream default branch into the fork; no
+	// other branches or tags are copied. This keeps the fork clean of upstream
+	// release tags (which would otherwise be frozen at fork-creation time and
+	// never sync), so tags live only on upstream and the local clone.
 	opts := &github.RepositoryCreateForkOptions{DefaultBranchOnly: true}
 	if forkName != "" {
 		opts.Name = forkName

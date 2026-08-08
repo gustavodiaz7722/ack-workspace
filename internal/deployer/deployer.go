@@ -1,6 +1,5 @@
-// Package deployer implements the Controller_Deployer, which builds a service
-// controller from its local implementation branch and deploys it to the shared
-// development cluster (deployer.ClusterName):
+// Package deployer builds a service controller from its local checkout and
+// deploys it to the shared development cluster (ClusterName):
 //
 //  1. resolve the caller's AWS account and region from the active credentials,
 //  2. bring the development cluster into the state a controller needs: create it
@@ -16,16 +15,13 @@
 //     at the freshly pushed image.
 //
 // The target cluster is not selectable and the current kubeconfig context is
-// never used as-is: step 2 repoints the kubeconfig on every deploy. That removes
-// the sharpest edge the command had, which was installing onto whatever cluster
-// happened to be selected.
+// never used as-is: step 2 repoints it on every deploy, so a deploy cannot land
+// on whatever cluster happened to be selected.
 //
-// Unlike the releaser, the deployer never touches git history: it reads the
-// checked-out branch as-is so a developer can iterate on local changes. It is
-// deliberately conservative about reporting: every execution problem is captured
-// as a failed Result rather than returned out-of-band, and in dry-run mode it
-// reports the steps it would take and touches nothing (no image is built, no
-// repository is created, and the cluster is not modified).
+// The deployer never touches git history; it reads the checked-out branch as-is
+// so a developer can iterate on local changes. Every execution problem is
+// captured as a failed Result rather than returned out-of-band, and a dry run
+// reports the steps it would take while touching nothing.
 package deployer
 
 import (
@@ -47,8 +43,8 @@ const (
 	// repository name. A bare alias ("ecr") and its full form ("ecr-controller")
 	// both normalize to the same repository.
 	controllerSuffix = "-controller"
-	// codegenDirName is the directory under the workspace root that holds the
-	// ACK code-generator (and its image build script).
+	// codegenDirName is the directory under the workspace root that holds the ACK
+	// code-generator (and its image build script).
 	codegenDirName = "code-generator"
 	// helmDirName is the controller subdirectory holding its Helm chart.
 	helmDirName = "helm"
@@ -73,8 +69,8 @@ type UsageError struct{ Msg string }
 func (e *UsageError) Error() string { return e.Msg }
 
 // Builder builds the controller container image from the local implementation
-// source. It is the seam through which the real code-generator script invocation
-// is replaced in tests.
+// source. It is the seam through which the real code-generator script
+// invocation is replaced in tests.
 type Builder interface {
 	// Build builds the image for service from the code-generator at codegenDir,
 	// tagging it imageRef. The build uses the controller's checked-out source, so
@@ -83,8 +79,8 @@ type Builder interface {
 }
 
 // Registry resolves the caller's AWS account and region and manages the ECR
-// repository the controller image is pushed to. It is the seam through which the
-// real aws/docker CLI invocations are replaced in tests.
+// repository the controller image is pushed to. It is the seam through which
+// the real aws/docker CLI invocations are replaced in tests.
 type Registry interface {
 	// Identity returns the AWS account ID and region resolved from the active
 	// credentials and configuration.
@@ -122,12 +118,12 @@ type Options struct {
 	// configured for. It defaults to the region resolved from the active AWS
 	// configuration when empty.
 	Region string
-	// ClusterVersion pins the Kubernetes version of the development cluster. It
-	// is only consulted when the cluster is actually created. When empty,
-	// eksctl's own default version is used.
+	// ClusterVersion pins the Kubernetes version of the development cluster. It is
+	// only consulted when the cluster is actually created. When empty, eksctl's
+	// own default version is used.
 	ClusterVersion string
-	// PolicyARNs are the IAM policies attached to the cluster's pod identity
-	// role. They default to DefaultPolicyARN (AdministratorAccess), which suits a
+	// PolicyARNs are the IAM policies attached to the cluster's pod identity role.
+	// They default to DefaultPolicyARN (AdministratorAccess), which suits a
 	// throwaway development account and nothing else. Like ClusterVersion, they
 	// only apply when the role has to be created.
 	PolicyARNs []string
@@ -137,11 +133,11 @@ type Options struct {
 	//
 	// This matters because the chart's own service account carries no AWS
 	// credential binding: it has no eks.amazonaws.com/role-arn annotation, and an
-	// EKS Pod Identity association is attached to a specific service account
-	// name. On a cluster that grants the controller credentials through either
-	// mechanism, a chart-created service account leaves the controller with no
-	// way to reach AWS and it exits at startup with "unable to determine account
-	// info: ... NoCredentialProviders".
+	// EKS Pod Identity association is attached to a specific service account name.
+	// On a cluster that grants the controller credentials through either
+	// mechanism, a chart-created service account leaves the controller with no way
+	// to reach AWS and it exits at startup with "unable to determine account info:
+	// ... NoCredentialProviders".
 	//
 	// It defaults to SharedServiceAccount, the account the development cluster's
 	// pod identity association is attached to. Naming a different one makes the
@@ -170,7 +166,7 @@ type DeployParams struct {
 	ServiceAccount string
 }
 
-// Deployer implements the Controller_Deployer.
+// Deployer builds a controller and deploys it to the development cluster.
 type Deployer struct {
 	builder     Builder
 	registry    Registry
@@ -179,9 +175,10 @@ type Deployer struct {
 }
 
 // New returns a Deployer wired to the production toolchain: the code-generator
-// image build script, the aws/docker CLIs for ECR, kubectl/helm for the cluster,
-// and eksctl for bootstrapping a managed development cluster. Constructing it
-// performs no external work; that happens only when Deploy runs.
+// image build script, the aws/docker CLIs for ECR, kubectl/helm for the
+// cluster, and eksctl for bootstrapping a managed development cluster.
+// Constructing it performs no external work; that happens only when Deploy
+// runs.
 func New() *Deployer {
 	return &Deployer{
 		builder:     execBuilder{},
@@ -191,9 +188,9 @@ func New() *Deployer {
 	}
 }
 
-// NewWith returns a Deployer backed by the supplied collaborators. It is intended
-// for tests that need to script build, registry, cluster, and provisioning
-// behavior without invoking the real toolchain.
+// NewWith returns a Deployer backed by the supplied collaborators. It is
+// intended for tests that need to script build, registry, cluster, and
+// provisioning behavior without invoking the real toolchain.
 func NewWith(b Builder, r Registry, c Cluster, p Provisioner) *Deployer {
 	return &Deployer{builder: b, registry: r, cluster: c, provisioner: p}
 }
@@ -225,9 +222,8 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 	codegenPath := filepath.Join(root, codegenDirName)
 	chartPath := filepath.Join(controllerPath, helmDirName)
 
-	// Pre-flight: the controller (with its Helm chart) and the code-generator
-	// must already be present in the workspace. Deploying neither forks nor
-	// clones.
+	// Pre-flight: the controller (with its Helm chart) and the code-generator must
+	// already be present in the workspace. Deploying neither forks nor clones.
 	if !dirExists(controllerPath) {
 		return failed(name, fmt.Errorf("controller %s not found at %s; add it first with `ack-workspace add %s`", name, controllerPath, alias))
 	}
@@ -241,8 +237,8 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		return failed(name, fmt.Errorf("Helm chart not found at %s", chartPath))
 	}
 
-	// Resolve the image tag from the local implementation commit unless the
-	// caller pinned one, so a build is traceable to the exact checked-out state.
+	// Resolve the image tag from the local implementation commit unless the caller
+	// pinned one, so a build is traceable to the exact checked-out state.
 	tag := strings.TrimSpace(opts.ImageTag)
 	if tag == "" {
 		repo := git.NewRepo(controllerPath, ap.Git)
@@ -313,8 +309,8 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 	}
 
 	// 1. Bring the cluster into the state a controller needs: create it when
-	// absent, repoint the kubeconfig at it, and make sure the controller's
-	// service account exists and is bound to AWS credentials.
+	// absent, repoint the kubeconfig at it, and make sure the controller's service
+	// account exists and is bound to AWS credentials.
 	if err := d.provision(ctx, region, namespace, serviceAccount, opts, clusterExisted); err != nil {
 		return failed(name, err)
 	}
@@ -477,10 +473,10 @@ func (execRegistry) Identity(ctx context.Context) (string, string, error) {
 	return account, region, nil
 }
 
-// EnsureRepository checks for the repository with `aws ecr describe-repositories`
-// and creates it with `aws ecr create-repository` when it is absent. A describe
-// failure is interpreted as "not present" and triggers creation, so a genuine
-// creation error is still surfaced.
+// EnsureRepository checks for the repository with `aws ecr
+// describe-repositories` and creates it with `aws ecr create-repository` when
+// it is absent. A describe failure is interpreted as "not present" and triggers
+// creation, so a genuine creation error is still surfaced.
 func (execRegistry) EnsureRepository(ctx context.Context, repo, region string) (bool, error) {
 	describe := exec.CommandContext(ctx, "aws", "ecr", "describe-repositories", "--repository-names", repo, "--region", region)
 	if _, err := runCombined(describe); err == nil {
@@ -522,15 +518,15 @@ func (execRegistry) PushImage(ctx context.Context, imageRef, region string) erro
 	return nil
 }
 
-// execCluster is the production Cluster. It shells out to helm, which honors the
-// current kubeconfig context — repointed at the development cluster by the
+// execCluster is the production Cluster. It shells out to helm, which honors
+// the current kubeconfig context — repointed at the development cluster by the
 // Provisioner earlier in the same deploy.
 type execCluster struct{}
 
-// Deploy installs or upgrades the controller's Helm chart with
-// `helm upgrade --install`, overriding the image repository and tag, setting the
-// controller's AWS region, and optionally binding it to an existing service
-// account. It creates the target namespace when necessary.
+// Deploy installs or upgrades the controller's Helm chart with `helm upgrade
+// --install`, overriding the image repository and tag, setting the controller's
+// AWS region, and optionally binding it to an existing service account. It
+// creates the target namespace when necessary.
 func (execCluster) Deploy(ctx context.Context, p DeployParams) error {
 	args := helmUpgradeArgs(p)
 	cmd := exec.CommandContext(ctx, "helm", args...)
@@ -551,8 +547,9 @@ func (execCluster) Deploy(ctx context.Context, p DeployParams) error {
 //
 // When p.ServiceAccount is set, the chart is told not to create a service
 // account and to reference the named one instead. The name goes through
-// `--set-string` for the same coercion reason as the tag: an all-digit name is a
-// valid Kubernetes object name but Helm would otherwise turn it into a number.
+// `--set-string` for the same coercion reason as the tag: an all-digit name is
+// a valid Kubernetes object name but Helm would otherwise turn it into a
+// number.
 func helmUpgradeArgs(p DeployParams) []string {
 	args := []string{
 		"upgrade", "--install", p.Release, p.ChartDir,
@@ -571,8 +568,8 @@ func helmUpgradeArgs(p DeployParams) []string {
 	return args
 }
 
-// runCombined runs cmd capturing both stdout and stderr into a single buffer and
-// returns the combined output together with any error, mirroring the git
+// runCombined runs cmd capturing both stdout and stderr into a single buffer
+// and returns the combined output together with any error, mirroring the git
 // ExecRunner so external-tool failures carry their diagnostic output.
 func runCombined(cmd *exec.Cmd) (string, error) {
 	var combined bytes.Buffer

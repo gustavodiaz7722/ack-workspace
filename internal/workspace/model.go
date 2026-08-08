@@ -1,12 +1,12 @@
-// Package workspace defines the shared data models used across all ack-workspace
-// components so that every command reports its results uniformly.
+// Package workspace defines the shared data models used across all
+// ack-workspace components so that every command reports its results uniformly.
 package workspace
 
 // RepoSpec fully describes how to fork, clone, and configure one repository.
 type RepoSpec struct {
 	UpstreamOwner string // "aws-controllers-k8s"
 	UpstreamName  string // "runtime", "s3-controller"
-	ForkOwner     string // contributor's GitHub_Identity
+	ForkOwner     string // contributor's GitHub identity
 	ForkName      string // "<prefix><UpstreamName>"
 	LocalPath     string // "<WorkspaceRoot>/<UpstreamName>"
 }
@@ -15,8 +15,10 @@ type RepoSpec struct {
 type Outcome string
 
 const (
-	// OutcomeCreated indicates a repository was cloned and configured.
-	// The add command renders this bucket with the label "added".
+	// OutcomeCreated is the success bucket: the repository was processed as the
+	// command intended. What that means depends on the command -- cloned, built,
+	// deployed, refreshed, released, or deleted -- so each relabels the bucket to
+	// read in its own terms (see cli.RenderOptions.CreatedLabel).
 	OutcomeCreated Outcome = "created"
 	// OutcomeSkipped indicates a repository was left untouched because it was
 	// already present, dirty, or had diverged history.
@@ -50,7 +52,7 @@ func (s Summary) Count(o Outcome) int {
 }
 
 // HasFailures reports whether any Result has an OutcomeFailed. It drives the
-// process exit code (Requirements 7.4, 7.5, 7.6).
+// process exit code.
 func (s Summary) HasFailures() bool {
 	for _, r := range s.Results {
 		if r.Outcome == OutcomeFailed {

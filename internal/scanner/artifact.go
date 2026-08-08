@@ -31,10 +31,10 @@ type controllerRef struct {
 
 // discoverControllers lists the controller repositories directly under root: an
 // immediate subdirectory is a valid controller when it contains a
-// generator.yaml. Work-in-progress checkouts that have not yet been scaffolded
-// lack a generator.yaml and are skipped, so "scan all" only visits controllers
-// it can actually scan. The result is sorted by alias so "scan all controllers"
-// is deterministic.
+// generator.yaml. Work-in-progress checkouts that have not been scaffolded yet
+// lack one and are skipped, so "all" only visits controllers that can be
+// indexed. The result is sorted by alias, so indexing every controller is
+// deterministic.
 //
 // A non-existent root is treated as empty (nil slice, nil error), mirroring
 // workspace.Discover, so callers can report "no controllers" rather than fail.
@@ -66,10 +66,10 @@ func discoverControllers(root string) ([]controllerRef, error) {
 // identifier may be the bare alias ("acm") or the full directory name
 // ("acm-controller"); both resolve to the same repository.
 //
-// The error distinguishes two cases so an explicit scan is actionable: a
-// directory matching the alias that exists but lacks a generator.yaml (a
-// work-in-progress checkout that has not been scaffolded yet) reports that it is
-// not scannable, while a truly absent controller reports "not found".
+// The error distinguishes two cases so an explicitly named controller is
+// actionable: a directory matching the alias that exists but lacks a
+// generator.yaml (a checkout that has not been scaffolded yet) says so, while a
+// truly absent controller reports "not found".
 func findController(root, identifier string) (controllerRef, error) {
 	want := controllerAlias(identifier)
 	refs, err := discoverControllers(root)
@@ -83,7 +83,7 @@ func findController(root, identifier string) (controllerRef, error) {
 	}
 	if dir, ok := locateControllerDir(root, want); ok {
 		return controllerRef{}, fmt.Errorf(
-			"controller %q at %s is not scannable yet: no %s found (the controller may be a work in progress)",
+			"controller %q at %s cannot be indexed yet: no %s found (the controller may be a work in progress)",
 			identifier, dir, generatorFileName)
 	}
 	return controllerRef{}, fmt.Errorf("controller %q not found under %s", identifier, root)
@@ -107,25 +107,24 @@ func locateControllerDir(root, want string) (string, bool) {
 }
 
 // isValidControllerWorkspace reports whether the directory at repoPath is a
-// scannable controller checkout. The presence of a generator.yaml (the
-// code-generator configuration) is what distinguishes a controller from any
-// other directory under the workspace root; work-in-progress controllers that
-// have not yet been scaffolded lack it and are treated as not scannable.
+// usable controller checkout. A generator.yaml (the code-generator
+// configuration) is what distinguishes a controller from any other directory
+// under the workspace root; controllers that have not been scaffolded yet lack
+// one.
 func isValidControllerWorkspace(repoPath string) bool {
 	_, err := os.Stat(filepath.Join(repoPath, generatorFileName))
 	return err == nil
 }
 
-// controllerAlias derives the controller alias from a directory or identifier by
-// removing the conventional "-controller" suffix.
+// controllerAlias derives the controller alias from a directory or identifier
+// by removing the conventional "-controller" suffix.
 func controllerAlias(name string) string {
 	return strings.TrimSuffix(name, controllerSuffix)
 }
 
-// generatorConfig is the subset of a controller's generator.yaml the scanner
-// reads: the set of resource Kinds it manages. The per-resource configuration
-// itself is inspected by the agent with run_command, so only the resource keys
-// are decoded here.
+// generatorConfig is the subset of a controller's generator.yaml read here: the
+// set of resource Kinds it manages. Per-field configuration is decoded
+// separately (see loadFieldConfig), so only the resource keys matter.
 type generatorConfig struct {
 	Resources map[string]resourceConfig `yaml:"resources"`
 }
@@ -209,7 +208,7 @@ func findResourceCRD(repoPath, resource string) (string, error) {
 }
 
 // discoverResources returns the resource Kinds declared under the controller's
-// generator.yaml `resources:` map, sorted, so "scan all resources" is
+// generator.yaml `resources:` map, sorted, so indexing every resource is
 // deterministic.
 func discoverResources(repoPath string) ([]string, error) {
 	cfg, err := loadGeneratorConfig(repoPath)

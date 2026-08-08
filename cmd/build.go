@@ -14,15 +14,15 @@ const flagSDKVersion = "sdk-version"
 // service controller's code from its local (checked-out) source by running the
 // code-generator's `make build-controller` target: it locates the controller
 // and the code-generator in the workspace, reports the controller's checked-out
-// branch, and runs `make build-controller SERVICE=<alias>` in the code-generator
-// directory with the environment overrides the build scripts need when the
-// workspace root is not literally ".../aws-controllers-k8s".
+// branch, and runs `make build-controller SERVICE=<alias>` in the
+// code-generator directory with the environment overrides the build scripts
+// need when the workspace root is not literally ".../aws-controllers-k8s".
 //
 // build reads the controller's checked-out branch, so it declares the git
-// prerequisite. It does not fork, clone, push to GitHub, or open a pull request,
-// so it needs no GitHub token or identity. The make and go toolchain must be
-// available at runtime; a build failure is reported as a failed Result. The
-// empty-service case is enforced by the Controller_Builder, which returns a
+// prerequisite. It does not fork, clone, push to GitHub, or open a pull
+// request, so it needs no GitHub token or identity. The make and go toolchain
+// must be available at runtime; a build failure is reported as a failed Result.
+// The empty-service case is enforced by the builder, which returns a
 // *builder.UsageError so the rule lives in one place and maps to a usage exit
 // code.
 func newBuildCommand(d deps, res *Result) *cobra.Command {
@@ -53,9 +53,8 @@ func newBuildCommand(d deps, res *Result) *cobra.Command {
 
 			sdkVersion, _ := cmd.Flags().GetString(flagSDKVersion)
 
-			// A missing service identifier is validated by the Controller_Builder
-			// (which returns a *builder.UsageError) so the rule is enforced in a
-			// single place.
+			// A missing service identifier is validated by the builder (which returns a
+			// *builder.UsageError) so the rule is enforced in a single place.
 			var service string
 			if len(args) > 0 {
 				service = args[0]

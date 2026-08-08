@@ -14,8 +14,8 @@ type Call struct {
 	Args []string
 }
 
-// String renders the call as the command line it represents, e.g.
-// `git status --porcelain (in /work/repo)`.
+// String renders the call as the command line it represents, e.g. `git status
+// --porcelain (in /work/repo)`.
 func (c Call) String() string {
 	return fmt.Sprintf("git %v (in %s)", c.Args, c.Dir)
 }
@@ -30,8 +30,8 @@ type Response struct {
 
 // MockRunner is a recording, scriptable Runner for tests. It captures every
 // invocation in order and returns scripted output/errors, so component tests
-// can assert the exact git argument vectors issued (Requirements 1.1, 8.3)
-// without spawning a real git process.
+// can assert the exact git argument vectors issued without spawning a real git
+// process.
 //
 // Response selection precedence per call:
 //  1. ResponseFunc, when set, computes the response from the call arguments.
@@ -44,13 +44,13 @@ type MockRunner struct {
 	// Calls records every Run invocation in the order they occurred.
 	Calls []Call
 
-	// Responses is a FIFO queue of scripted responses. Each Run call consumes
-	// the next entry unless ResponseFunc is set.
+	// Responses is a FIFO queue of scripted responses. Each Run call consumes the
+	// next entry unless ResponseFunc is set.
 	Responses []Response
 
-	// ResponseFunc, when non-nil, takes precedence over Responses and computes
-	// a response from the call's dir and args. It is the ergonomic choice for
-	// tests that vary output based on the git subcommand (e.g. returning porcelain
+	// ResponseFunc, when non-nil, takes precedence over Responses and computes a
+	// response from the call's dir and args. It is the ergonomic choice for tests
+	// that vary output based on the git subcommand (e.g. returning porcelain
 	// status for `status --porcelain` and a branch name for `symbolic-ref`).
 	ResponseFunc func(dir string, args []string) (string, error)
 }
@@ -65,9 +65,9 @@ func (m *MockRunner) Queue(output string, err error) *MockRunner {
 	return m
 }
 
-// Run records the invocation and returns the next scripted response. A defensive
-// copy of args is stored so later mutation by the caller cannot corrupt the
-// recorded history.
+// Run records the invocation and returns the next scripted response. A
+// defensive copy of args is stored so later mutation by the caller cannot
+// corrupt the recorded history.
 func (m *MockRunner) Run(_ context.Context, dir string, args ...string) (string, error) {
 	argsCopy := append([]string(nil), args...)
 	m.Calls = append(m.Calls, Call{Dir: dir, Args: argsCopy})

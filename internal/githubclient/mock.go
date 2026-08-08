@@ -6,8 +6,8 @@ import (
 )
 
 // Mock is a scripted, call-recording implementation of GitHubClient for use in
-// tests of components that depend on GitHubClient (such as the initializer and
-// adder). It is designed for ergonomic table-driven scripting:
+// tests of components that depend on GitHubClient. It is designed for ergonomic
+// table-driven scripting:
 //
 //   - Per-repository state (exists / not-found / API error) is configured via
 //     SetRepo or by populating Repos directly.
@@ -19,26 +19,26 @@ import (
 //     queryable afterward).
 //
 // Every call is recorded in Calls so tests can assert which methods were
-// invoked and with what arguments. The zero value is not usable; construct a
-// Mock with NewMock.
+// invoked and with what arguments. NewMock pre-allocates the maps; a zero Mock
+// works too, since the setters allocate lazily.
 type Mock struct {
 	mu sync.Mutex
 
-	// Repos holds the static scripted state keyed by "owner/name". A key that
-	// is absent resolves as not-found (exists=false, nil error).
+	// Repos holds the static scripted state keyed by "owner/name". A key that is
+	// absent resolves as not-found (exists=false, nil error).
 	Repos map[string]RepoState
 
-	// existSeq holds optional per-reference RepoExists result sequences, keyed
-	// by "owner/name". When a sequence exists and is non-empty, the next call
+	// existSeq holds optional per-reference RepoExists result sequences, keyed by
+	// "owner/name". When a sequence exists and is non-empty, the next call
 	// consumes its head; once exhausted the Mock falls back to Repos.
 	existSeq map[string][]ExistResult
 
-	// ForkOwner is the owner assigned to forks returned by CreateFork. It
-	// defaults to "octocat".
+	// ForkOwner is the owner assigned to forks returned by CreateFork. It defaults
+	// to "octocat".
 	ForkOwner string
 
-	// ForkAppears controls whether a successful CreateFork registers the new
-	// fork as an existing repository in Repos. It defaults to true.
+	// ForkAppears controls whether a successful CreateFork registers the new fork
+	// as an existing repository in Repos. It defaults to true.
 	ForkAppears bool
 
 	// CreateForkErr, when non-nil, is returned by CreateFork without creating a
@@ -46,20 +46,20 @@ type Mock struct {
 	// *ForkTimeoutError to simulate the fork never becoming queryable.
 	CreateForkErr error
 
-	// OrgRepos holds the scripted repository names returned by ListOrgRepos,
-	// keyed by organization. A key that is absent yields an empty list.
+	// OrgRepos holds the scripted repository names returned by ListOrgRepos, keyed
+	// by organization. A key that is absent yields an empty list.
 	OrgRepos map[string][]string
 
 	// ListOrgReposErr, when non-nil, is returned by ListOrgRepos to simulate a
 	// listing/API failure.
 	ListOrgReposErr error
 
-	// DeleteRepoErr, when non-nil, is returned by DeleteRepo to simulate a
-	// delete failure.
+	// DeleteRepoErr, when non-nil, is returned by DeleteRepo to simulate a delete
+	// failure.
 	DeleteRepoErr error
 
-	// PullRequestURL is the URL CreatePullRequest returns on success. It
-	// defaults to a synthetic URL derived from the upstream reference.
+	// PullRequestURL is the URL CreatePullRequest returns on success. It defaults
+	// to a synthetic URL derived from the upstream reference.
 	PullRequestURL string
 
 	// CreatePullRequestErr, when non-nil, is returned by CreatePullRequest to
@@ -90,8 +90,8 @@ type RepoState struct {
 	Exists bool
 	// DefaultBranch is returned by DefaultBranch when Err is nil.
 	DefaultBranch string
-	// Err, when non-nil, is returned by RepoExists and DefaultBranch to simulate
-	// a transport or API error (as opposed to a not-found result).
+	// Err, when non-nil, is returned by RepoExists and DefaultBranch to simulate a
+	// transport or API error (as opposed to a not-found result).
 	Err error
 }
 
@@ -107,13 +107,12 @@ type Call struct {
 	// "ListOrgRepos", "DeleteRepo", "CreatePullRequest", or "SyncFork".
 	Method string
 	// Ref is the repository reference passed to the call. For CreateFork and
-	// CreatePullRequest it is the upstream reference; for SyncFork it is the
-	// fork reference; for ListOrgRepos only Ref.Owner (the org) is set.
+	// CreatePullRequest it is the upstream reference; for SyncFork it is the fork
+	// reference; for ListOrgRepos only Ref.Owner (the org) is set.
 	Ref RepoRef
 	// ForkName is the requested fork name; populated for CreateFork only.
 	ForkName string
-	// PullRequest is the pull request input; populated for CreatePullRequest
-	// only.
+	// PullRequest is the pull request input; populated for CreatePullRequest only.
 	PullRequest NewPullRequest
 	// Branch is the branch argument; populated for SyncFork only.
 	Branch string
@@ -201,9 +200,9 @@ func (m *Mock) DefaultBranch(ctx context.Context, ref RepoRef) (string, error) {
 
 // CreateFork records the call and returns a scripted fork reference. When
 // CreateForkErr is set it is returned without creating a fork. Otherwise the
-// fork reference is {ForkOwner, forkName-or-upstream-name} and, when ForkAppears
-// is true, the fork is registered as existing so subsequent RepoExists calls
-// resolve it.
+// fork reference is {ForkOwner, forkName-or-upstream-name} and, when
+// ForkAppears is true, the fork is registered as existing so subsequent
+// RepoExists calls resolve it.
 func (m *Mock) CreateFork(ctx context.Context, upstream RepoRef, forkName string) (RepoRef, error) {
 	m.record(Call{Method: "CreateFork", Ref: upstream, ForkName: forkName})
 

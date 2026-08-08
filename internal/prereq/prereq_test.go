@@ -29,8 +29,8 @@ func TestCheck_AllPresent(t *testing.T) {
 }
 
 func TestCheck_NoNeedsAlwaysPasses(t *testing.T) {
-	// Even with git missing and empty config, a Need with nothing requested
-	// must pass (e.g. the `config` command requires no prerequisites).
+	// Even with git missing and empty config, a Need with nothing requested must
+	// pass (e.g. the `config` command requires no prerequisites).
 	c := NewCheckerWithLookPath(gitMissing)
 	if err := c.Check(Need{}, config.Config{}); err != nil {
 		t.Fatalf("expected no error for empty Need, got: %v", err)

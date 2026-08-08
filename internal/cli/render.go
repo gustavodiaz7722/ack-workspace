@@ -27,12 +27,12 @@ type RenderOptions struct {
 	// CreatedLabel overrides the label used for the OutcomeCreated bucket in both
 	// the count header and the per-repository lines. When empty, "created" is
 	// used. The add command passes "added" so OutcomeCreated renders as "added"
-	// (Requirement 4.9); the sync command passes "updated".
+	//; the sync command passes "updated".
 	CreatedLabel string
 }
 
-// RenderSummary writes a human-readable rendering of summary to w. The output is
-// a count header (created/added, skipped, and failed totals) followed by one
+// RenderSummary writes a human-readable rendering of summary to w. The output
+// is a count header (created/added, skipped, and failed totals) followed by one
 // line per repository giving its name, outcome, and reason (when present).
 //
 // The OutcomeCreated bucket is labeled using opts.CreatedLabel (defaulting to
@@ -45,7 +45,7 @@ func RenderSummary(w io.Writer, summary workspace.Summary, opts RenderOptions) e
 	}
 
 	// Count header. OutcomeCreated is reported under the (possibly overridden)
-	// created label so the add summary reads "added: N" (Requirement 4.9).
+	// created label so the add summary reads "added: N".
 	if _, err := fmt.Fprintf(w, "%s: %d, skipped: %d, failed: %d\n",
 		createdLabel,
 		summary.Count(workspace.OutcomeCreated),
@@ -59,8 +59,8 @@ func RenderSummary(w io.Writer, summary workspace.Summary, opts RenderOptions) e
 		return nil
 	}
 
-	// Per-repository lines, column-aligned. The reason column is emitted only
-	// when a result carries one, so successful created rows stay uncluttered.
+	// Per-repository lines, column-aligned. The reason column is emitted only when
+	// a result carries one, so successful created rows stay uncluttered.
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, r := range summary.Results {
 		if r.Reason != "" {

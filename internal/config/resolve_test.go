@@ -18,9 +18,9 @@ func writePersisted(t *testing.T, m Manager, c Config) {
 }
 
 // TestResolvePrecedenceMatrix verifies, per configuration value, that the
-// effective value is selected with precedence flag > env > persisted > default
-// (Requirement 2.4). Each case isolates one value and constructs the layers so
-// that a specific layer is expected to win.
+// effective value is selected with precedence flag > env > persisted > default.
+// Each case isolates one value and constructs the layers so that a specific
+// layer is expected to win.
 func TestResolvePrecedenceMatrix(t *testing.T) {
 	const absFlagRoot = "/tmp/flag/root"
 	const absFileRoot = "/tmp/file/root"
@@ -169,9 +169,9 @@ func TestResolvePrecedenceMatrix(t *testing.T) {
 }
 
 // TestResolveDefaults asserts the default values applied when no flag, env, or
-// persisted value supplies a configuration value (Requirements 2.2, 2.3). A
-// GitHub identity is supplied so resolution does not fail on the missing
-// required value; only the defaulted values are asserted.
+// persisted value supplies a configuration value. A GitHub identity is supplied
+// so resolution does not fail on the missing required value; only the defaulted
+// values are asserted.
 func TestResolveDefaults(t *testing.T) {
 	m := NewManagerWithHome(t.TempDir())
 
@@ -205,7 +205,7 @@ func TestResolveDefaults(t *testing.T) {
 
 // TestResolveTokenNeverPersisted round-trips a Save (with a token) then reads
 // the raw file to assert the token is absent, and confirms Resolve still
-// surfaces the token from the environment for the invocation (Requirement 2.5).
+// surfaces the token from the environment for the invocation.
 func TestResolveTokenNeverPersisted(t *testing.T) {
 	m := NewManagerWithHome(t.TempDir())
 
@@ -234,8 +234,7 @@ func TestResolveTokenNeverPersisted(t *testing.T) {
 }
 
 // TestResolveUnparsableFileError asserts that when the configuration file
-// exists but cannot be parsed, Resolve returns a *ParseError naming the path
-// (Requirement 2.6).
+// exists but cannot be parsed, Resolve returns a *ParseError naming the path.
 func TestResolveUnparsableFileError(t *testing.T) {
 	home := t.TempDir()
 	m := NewManagerWithHome(home)
@@ -263,7 +262,7 @@ func TestResolveUnparsableFileError(t *testing.T) {
 
 // TestResolveMissingIdentityError asserts that when no configuration file
 // exists and no GitHub identity is supplied by flag or environment variable,
-// Resolve returns a *MissingGitHubUserError (Requirement 2.7).
+// Resolve returns a *MissingGitHubUserError.
 func TestResolveMissingIdentityError(t *testing.T) {
 	m := NewManagerWithHome(t.TempDir())
 

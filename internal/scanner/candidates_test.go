@@ -35,9 +35,9 @@ func (f *stubFetcher) FetchModel(context.Context, string) (string, error) {
 	return f.model, nil
 }
 
-// decodeLines parses a JSON Lines body into records, failing the test if any line
-// is not a self-contained JSON object. That property is what lets a consumer grep
-// the index and read it incrementally.
+// decodeLines parses a JSON Lines body into records, failing the test if any
+// line is not a self-contained JSON object. That property is what lets a
+// consumer grep the index and read it incrementally.
 func decodeLines(t *testing.T, body string) []CandidateRecord {
 	t.Helper()
 	var out []CandidateRecord
@@ -506,9 +506,9 @@ func TestMarshalCandidateLinesOneObjectPerLine(t *testing.T) {
 	}
 }
 
-// Guard the Summary contract the command depends on: only failures are returned,
-// so main.go renders nothing on a clean run but a real failure still reaches the
-// exit code.
+// Guard the Summary contract the command depends on: only failures are
+// returned, so main.go renders nothing on a clean run but a real failure still
+// reaches the exit code.
 func TestCandidatesSummaryCarriesOnlyFailures(t *testing.T) {
 	root := t.TempDir()
 	writeControllerRepo(t, root, "acm-controller")
@@ -539,9 +539,9 @@ func TestCandidatesSummaryCarriesOnlyFailures(t *testing.T) {
 	}
 }
 
-// suppressedStructModel mirrors sfn: an operation input carrying a struct member
-// whose own leaf is a reference. Suppressing the struct hides the leaf, and the
-// struct's name says nothing about what it contains.
+// suppressedStructModel mirrors sfn: an operation input carrying a struct
+// member whose own leaf is a reference. Suppressing the struct hides the leaf,
+// and the struct's name says nothing about what it contains.
 const suppressedStructModel = `{
   "smithy": "2.0",
   "shapes": {
@@ -566,10 +566,10 @@ const suppressedStructModel = `{
   }
 }`
 
-// A suppressed struct hides every field inside it. Reporting only paths whose own
-// final segment looks like an identifier misses those entirely — sfn removes
-// CreateStateMachineInput.EncryptionConfiguration, and the kms Key reference is
-// the KmsKeyId leaf inside it.
+// A suppressed struct hides every field inside it. Reporting only paths whose
+// own final segment looks like an identifier misses those entirely — sfn
+// removes CreateStateMachineInput.EncryptionConfiguration, and the kms Key
+// reference is the KmsKeyId leaf inside it.
 func TestSuppressedIdentifierFieldsFindsIdentifiersInsideSuppressedStructs(t *testing.T) {
 	root := t.TempDir()
 	generator := `ignore:

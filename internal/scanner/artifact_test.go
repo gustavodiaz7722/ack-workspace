@@ -138,8 +138,8 @@ func TestDiscoverControllersSkipsWorkInProgress(t *testing.T) {
 func TestFindControllerWorkInProgress(t *testing.T) {
 	root := t.TempDir()
 	// A checkout without a generator.yaml is a work-in-progress controller: it
-	// exists but is not scannable, and must be reported distinctly from an
-	// absent controller.
+	// exists but cannot be indexed, and must be reported distinctly from an absent
+	// controller.
 	if err := os.MkdirAll(filepath.Join(root, "wip-controller"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -148,8 +148,8 @@ func TestFindControllerWorkInProgress(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a work-in-progress controller")
 	}
-	if !strings.Contains(err.Error(), "not scannable yet") {
-		t.Errorf("error = %q, want it to explain the checkout is not scannable yet", err)
+	if !strings.Contains(err.Error(), "cannot be indexed yet") {
+		t.Errorf("error = %q, want it to explain the checkout cannot be indexed yet", err)
 	}
 }
 

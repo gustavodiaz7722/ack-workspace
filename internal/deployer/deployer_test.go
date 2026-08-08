@@ -1,13 +1,13 @@
 // Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
-// Licensed under the Apache License, Version 2.0 (the "License"). You may
-// not use this file except in compliance with the License. A copy of the
-// License is located at
+// Licensed under the Apache License, Version 2.0 (the "License"). You may not
+// use this file except in compliance with the License. A copy of the License is
+// located at
 //
 //     http://aws.amazon.com/apache2.0/
 //
-// or in the "license" file accompanying this file. This file is distributed
-// on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+// or in the "license" file accompanying this file. This file is distributed on
+// an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 // express or implied. See the License for the specific language governing
 // permissions and limitations under the License.
 
@@ -49,8 +49,8 @@ func hasArg(args []string, a string) bool {
 
 func TestHelmUpgradeArgs_TagUsesSetString(t *testing.T) {
 	// An all-digit commit SHA is the regression case: with plain --set, Helm
-	// coerces it to a number and the chart's values schema rejects it with
-	// "got number, want string".
+	// coerces it to a number and the chart's values schema rejects it with "got
+	// number, want string".
 	const tag = "4881291"
 	args := helmUpgradeArgs(DeployParams{
 		ChartDir:  "/charts/ecr",
@@ -106,10 +106,10 @@ func TestHelmUpgradeArgs_CoreArgs(t *testing.T) {
 }
 
 // TestHelmUpgradeArgs_NoServiceAccountWhenUnset pins that the argument builder
-// only emits service-account overrides when it is given one, leaving the chart's
-// own handling alone otherwise. A deploy always names an account (the one the
-// cluster binds credentials to), so this covers the builder in isolation rather
-// than a reachable deploy path.
+// only emits service-account overrides when it is given one, leaving the
+// chart's own handling alone otherwise. A deploy always names an account (the
+// one the cluster binds credentials to), so this covers the builder in
+// isolation rather than a reachable deploy path.
 func TestHelmUpgradeArgs_NoServiceAccountWhenUnset(t *testing.T) {
 	args := helmUpgradeArgs(DeployParams{
 		ChartDir:  "/charts/ecr",
@@ -147,8 +147,8 @@ func TestHelmUpgradeArgs_ServiceAccountReusesExisting(t *testing.T) {
 	if setFlagFor(args, "serviceAccount.create=false") != "--set" {
 		t.Errorf("expected serviceAccount.create=false via --set, got args %v", args)
 	}
-	// The name goes through --set-string so an all-digit name is not coerced to
-	// a number, matching the image.tag handling.
+	// The name goes through --set-string so an all-digit name is not coerced to a
+	// number, matching the image.tag handling.
 	if got := setFlagFor(args, "serviceAccount.name="+sa); got != "--set-string" {
 		t.Errorf("serviceAccount.name should be passed with --set-string, got %q in %v", got, args)
 	}

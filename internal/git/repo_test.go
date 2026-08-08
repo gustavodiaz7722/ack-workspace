@@ -319,8 +319,8 @@ func TestCanFastForward_FalseWhenNotAncestor(t *testing.T) {
 func TestCanFastForward_RealErrorSurfaced(t *testing.T) {
 	ctx := context.Background()
 	repo, m := newRepoWithMock("/work/runtime")
-	// A higher exit code (e.g. unknown revision) is a genuine error, distinct
-	// from the exit-1 "not an ancestor" answer.
+	// A higher exit code (e.g. unknown revision) is a genuine error, distinct from
+	// the exit-1 "not an ancestor" answer.
 	m.Queue("fatal: Not a valid object name", &ExitError{Code: 128})
 
 	ok, err := repo.CanFastForward(ctx, "main", "upstream/bogus")

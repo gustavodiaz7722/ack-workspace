@@ -24,14 +24,11 @@ automates it.
 - **`release`** — cut a release for a single service controller: update its base branch
   from upstream, create a `release-<version>` branch, regenerate the release artifacts,
   commit and push them to your fork, and open a pull request against upstream.
-- **`deploy`** — build a single service controller from its local implementation branch and
-  deploy it to the shared ACK development cluster (`ack-dev-auto`): **bootstrap that cluster
-  if it does not exist** (EKS Auto Mode plus an EKS Pod Identity association for the
-  controller), repoint your kubeconfig at it, ensure an ECR repository exists (creating it
-  when absent), build the controller image from the checked-out source, push it to ECR, and
-  `helm upgrade --install` the controller with the freshly built image. The cluster is fixed
-  and your current kubeconfig context is never used as-is, so a deploy cannot land somewhere
-  unintended. Requires `docker`, `aws`, `kubectl`, `helm`, and `eksctl` on your `PATH`.
+- **`deploy`** — build a single service controller from your local checkout and deploy it to
+  the shared ACK development cluster (`ack-dev-auto`), **creating that cluster if it does not
+  exist**. The cluster is fixed and your kubeconfig is repointed at it every run, so a deploy
+  cannot land somewhere unintended. Requires `docker`, `aws`, `kubectl`, `helm`, and `eksctl`
+  on your `PATH`.
 - **`build`** — regenerate a single service controller's code from its local checked-out
   branch by running the code-generator's `make build-controller` target. Wires up the
   environment overrides (`RUNTIME_CRD_DIR`, `ACK_GENERATE_BIN_PATH`, `TEMPLATES_DIR`) that
@@ -54,8 +51,9 @@ Built-in safety:
 - **Destructive commands confirm first** — `refresh` and `remove` discard local state, so
   they require an interactive confirmation (or `--yes`); work committed on other branches
   is left intact.
-- **`--dry-run`** — preview exactly what every command would do without touching GitHub,
-  git, or the filesystem.
+- **`--dry-run`** — preview what a command would do without changing GitHub, git, the
+  filesystem, or any cloud resource. Read-only lookups (resolving your AWS account, checking
+  whether the cluster exists) still run, so the preview reflects reality.
 - **Resilient & concurrent** — repositories are processed in parallel with a bounded
   worker pool; one failing repository never stops the batch.
 
@@ -95,6 +93,7 @@ anything is missing:
 | `refresh`|  yes  |     yes²     |       yes       |
 | `status` |  yes  |      no      |       no        |
 | `candidates` | no³ |    no      |       no        |
+| `attribution` | yes |   no⁶     |       no        |
 | `config` |  no   |      no      |       no        |
 
 ¹ `release` needs a token to open the upstream pull request and your identity to name the
@@ -115,6 +114,10 @@ cluster and an IAM role the first time. No GitHub token or identity is required.
 ⁵ `build` needs `git` to read the controller's checked-out branch, plus the `make` and `go`
 toolchain (and the code-generator's own build dependencies, such as `controller-gen` and
 `helm`) on your `PATH`. No GitHub token or identity is required.
+
+⁶ `attribution` needs `git` to read the controller's checked-out branch and **AWS
+credentials** (default chain) allowed to run CodeBuild and read and write the artifact
+bucket. No GitHub token or identity is required.
 
 Provide a GitHub token via the `--token` flag or the `GITHUB_TOKEN` environment variable.
 The token is **never** written to the config file.
@@ -311,8 +314,8 @@ ack-workspace build ecr --sdk-version v1.41.0  # pin the aws-sdk-go version
 
 ### Build and deploy a controller from local source
 
-Build a single service controller from its **local implementation branch** and deploy it
-to the ACK development cluster. Use this to test in-progress changes on a real cluster. The
+Build a single service controller from your **local checkout** and deploy it to the ACK
+development cluster. Use this to test in-progress changes on a real cluster. The
 controller and the `code-generator` must already be present in your workspace (run `init` and
 `add` first), and `docker`, `aws`, `kubectl`, `helm`, and `eksctl` must be on your `PATH`:
 
@@ -407,6 +410,29 @@ eksctl delete cluster --name ack-dev-auto --region us-west-2
 ack-workspace status
 ack-workspace status --json
 ```
+
+### Build the cross-resource-reference candidate index
+
+`candidates` emits, as JSON Lines, every string-valued spec field of a resource's CRD fused
+with the `generator.yaml` markings that bear on whether the field is a reference
+(`is_reference` and its configured target, `is_immutable`, `is_primary_key`) and with the
+service API model's field documentation and validation patterns.
+
+It is the mechanical narrowing step of a reference audit: it produces the field set a
+reviewer then judges. Model documentation is resolved by walking the model's shape graph to
+each field path, which is what makes nested fields — undocumented in the CRD, and where
+reference gaps concentrate — judgeable at all. Two runs over an unchanged repository produce
+the same set, so an audit can be split across reviewers who all start from identical input.
+
+```bash
+ack-workspace candidates eks --resource Nodegroup                     # records on stdout
+ack-workspace candidates all --resource all --out-dir /tmp/ref-audit  # one file per resource
+```
+
+Records go to stdout and progress plus `ignore.field_paths` suppression notes to stderr, so
+stdout stays machine-readable. It reads local repositories and the public API models, so it
+needs no AWS credentials, git, or GitHub identity. A model that cannot be fetched degrades
+the affected records (`model_unavailable: true`) rather than failing the run.
 
 ### Generate a controller's ATTRIBUTION.md
 

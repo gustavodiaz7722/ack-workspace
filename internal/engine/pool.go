@@ -27,16 +27,14 @@ type Task func(ctx context.Context) workspace.Result
 //
 // A concurrency value of zero or less is treated as 1 (defensive; the accepted
 // 1..32 range is validated during flag/config resolution elsewhere).
-//
-// Validates: Requirements 7.1, 7.2, 7.4
 func Run(ctx context.Context, concurrency int, tasks []Task) []workspace.Result {
 	if concurrency <= 0 {
 		concurrency = 1
 	}
 
 	results := make([]workspace.Result, len(tasks))
-	// Bounded semaphore: at most `concurrency` tokens are held at once, so no
-	// more than `concurrency` tasks execute simultaneously.
+	// Bounded semaphore: at most `concurrency` tokens are held at once, so no more
+	// than `concurrency` tasks execute simultaneously.
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 

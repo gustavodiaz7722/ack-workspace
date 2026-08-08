@@ -5,7 +5,7 @@ import "context"
 // BuildState is the terminal-or-not state of one remote generation build. The
 // values mirror CodeBuild's buildStatus vocabulary, but are redeclared here so
 // the component, its tests, and the CLI layer stay free of any AWS SDK
-// dependency (see the package doc: only codebuild.go imports the SDK).
+// dependency (only codebuild.go imports the AWS SDK).
 type BuildState string
 
 const (
@@ -25,8 +25,8 @@ const (
 	StateTimedOut BuildState = "TIMED_OUT"
 )
 
-// Terminal reports whether the state is final, so the poll loop can stop.
-// An unrecognized state is treated as terminal rather than in-progress: waiting
+// Terminal reports whether the state is final, so the poll loop can stop. An
+// unrecognized state is treated as terminal rather than in-progress: waiting
 // forever on a state this code does not understand is worse than reporting it.
 func (s BuildState) Terminal() bool {
 	return s != StateInProgress
@@ -86,10 +86,9 @@ func (p Provisioned) Created() bool {
 // attribution document, and stage it at Bucket/Key.
 //
 // The repository and ref travel as per-build environment overrides rather than
-// as the project's own source configuration. That is deliberate: it lets a
-// single, immutable project serve every controller and every ref, so concurrent
-// runs cannot race each other by rewriting a shared project's source (which is
-// what the superseded bootstrap script did via update-project).
+// as the project's own source configuration, so one immutable project serves
+// every controller and every ref and concurrent runs cannot race by rewriting
+// it.
 type BuildRequest struct {
 	Project string
 	RepoURL string
@@ -106,13 +105,9 @@ type BuildStatus struct {
 	// "BUILD"). It is reported on failure so the user learns which step broke
 	// without reading logs.
 	Phase string
-	// LogsURL deep-links to the build's CloudWatch log stream.
-	//
-	// A link, rather than the log text, is the deliberate choice here. The
-	// superseded run_attribution.sh reconstructed the generated file by scraping
-	// these logs between marker lines and stripping tab characters, which
-	// silently corrupted license text. This feature transports the document
-	// through S3 and uses logs only for human diagnosis.
+	// LogsURL deep-links to the build's CloudWatch log stream. Logs are for human
+	// diagnosis only; the document itself travels through S3 (see the package
+	// doc).
 	LogsURL string
 }
 

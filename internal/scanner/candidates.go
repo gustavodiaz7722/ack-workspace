@@ -1,7 +1,7 @@
 // Package scanner implements the `candidates` feature: it emits the
 // deterministic cross-resource-reference candidate index for a resource — every
-// string-valued CRD spec field, fused with the generator.yaml markings that bear
-// on whether the field is a reference and with the service API model's
+// string-valued CRD spec field, fused with the generator.yaml markings that
+// bear on whether the field is a reference and with the service API model's
 // documentation and validation patterns.
 //
 // It is the mechanical narrowing step of a reference audit, deliberately
@@ -31,9 +31,9 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
-// All is the sentinel accepted on both the controller and resource dimensions to
-// mean "every one", fanning the index out over everything under the workspace
-// root.
+// All is the sentinel accepted on both the controller and resource dimensions
+// to mean "every one", fanning the index out over everything under the
+// workspace root.
 const All = "all"
 
 // resolveControllers turns the controller selector into concrete controller
@@ -65,12 +65,12 @@ func resolveResources(c controllerRef, selector string) ([]string, error) {
 // markings that bear on whether it is a reference and with the API model's
 // documentation and validation pattern.
 //
-// The record is the unit of the candidate index, emitted one per line as JSON so
-// it greps cleanly and so a reviewer can diff two runs. Only string-valued fields
-// appear: a reference holds an ARN, ID, or Name, always carried in a string or a
-// list of strings, so object and non-string scalar fields are never candidates.
-// The ACK-generated "<name>Ref" companion structures are dropped as well —
-// they are controller plumbing, not API fields.
+// The record is the unit of the candidate index, emitted one per line as JSON
+// so it greps cleanly and so a reviewer can diff two runs. Only string-valued
+// fields appear: a reference holds an ARN, ID, or Name, always carried in a
+// string or a list of strings, so object and non-string scalar fields are never
+// candidates. The ACK-generated "<name>Ref" companion structures are dropped as
+// well — they are controller plumbing, not API fields.
 type CandidateRecord struct {
 	// Resource is the resource Kind the field belongs to. It is carried on every
 	// record so a merged multi-resource stream stays interpretable.
@@ -84,8 +84,8 @@ type CandidateRecord struct {
 	// CRD only for top-level spec fields, so for a nested field this is resolved
 	// from the service's Smithy model instead.
 	Description string `json:"description,omitempty"`
-	// DescriptionSource is "crd" or "model", so a reader can weigh the
-	// description and tell a missing one from an empty one.
+	// DescriptionSource is "crd" or "model", so a reader can weigh the description
+	// and tell a missing one from an empty one.
 	DescriptionSource string `json:"description_source,omitempty"`
 	// ModelUnavailable marks a record built while the service's API model could
 	// not be fetched, so it carries no model description and no pattern and is
@@ -112,10 +112,10 @@ type CandidateRecord struct {
 	// service and resource type outright, the strongest available signal that the
 	// field is a cross-resource reference.
 	Pattern string `json:"pattern,omitempty"`
-	// IsReference reports whether generator.yaml already configures the field
-	// with a references block. This is the authoritative answer to "is this
-	// already done"; the CRD's companion fields are not, because sibling fields
-	// collapse onto one companion name.
+	// IsReference reports whether generator.yaml already configures the field with
+	// a references block. This is the authoritative answer to "is this already
+	// done"; the CRD's companion fields are not, because sibling fields collapse
+	// onto one companion name.
 	IsReference bool `json:"is_reference"`
 	// ReferenceTarget is the configured target, rendered as "<service> <Kind> ->
 	// <path>" (the service omitted for a same-service reference). It is set only
@@ -123,12 +123,12 @@ type CandidateRecord struct {
 	// the controller's own conventions.
 	ReferenceTarget string `json:"reference_target,omitempty"`
 	// IsImmutable reports whether generator.yaml marks the field is_immutable. A
-	// supporting signal in favour of a reference, not an exclusion: a KMS key,
-	// IAM role, parent ID, or subnet is typically set once.
+	// supporting signal in favour of a reference, not an exclusion: a KMS key, IAM
+	// role, parent ID, or subnet is typically set once.
 	IsImmutable bool `json:"is_immutable"`
-	// IsPrimaryKey reports whether generator.yaml marks the field
-	// is_primary_key. It cuts both ways: the resource's own key is not a
-	// reference, but a sub-resource's primary key frequently points at its parent.
+	// IsPrimaryKey reports whether generator.yaml marks the field is_primary_key.
+	// It cuts both ways: the resource's own key is not a reference, but a
+	// sub-resource's primary key frequently points at its parent.
 	IsPrimaryKey bool `json:"is_primary_key"`
 }
 
@@ -147,8 +147,8 @@ type ResourceIndex struct {
 	Resource string `json:"resource"`
 	// Model is the aws-sdk-go-v2 model name the documentation was resolved from.
 	Model string `json:"model"`
-	// ModelAvailable reports whether the model was fetched and decoded. When
-	// false the index is degraded rather than absent: nested fields lose their
+	// ModelAvailable reports whether the model was fetched and decoded. When false
+	// the index is degraded rather than absent: nested fields lose their
 	// documentation and patterns, leaving them judgeable by name alone.
 	ModelAvailable bool `json:"model_available"`
 	// Candidates are the resource's candidate fields, ordered by path.
@@ -157,22 +157,22 @@ type ResourceIndex struct {
 	// the CRD via ignore.field_paths. They can never appear among Candidates
 	// however the index is built, and a suppression can hide a reference, so an
 	// empty Candidates gap list alongside a non-empty Suppressed is not a clean
-	// resource. A suppressed field is also not fixable with a references block:
-	// a reference cannot target a field absent from the CRD.
+	// resource. A suppressed field is also not fixable with a references block: a
+	// reference cannot target a field absent from the CRD.
 	Suppressed []string `json:"suppressed,omitempty"`
 }
 
 // CandidatesOptions selects what to index and where to write it.
 type CandidatesOptions struct {
-	// Controller is a controller alias, its full "<alias>-controller" form, or
-	// All to index every controller under the workspace root.
+	// Controller is a controller alias, its full "<alias>-controller" form, or All
+	// to index every controller under the workspace root.
 	Controller string
 	// Resource is a resource Kind or All to index every resource the selected
 	// controllers declare.
 	Resource string
 	// OutDir, when non-empty, writes one "<OutDir>/<alias>/<Resource>.jsonl" per
-	// resource instead of streaming every record to the writer. This is the form
-	// a parallel audit consumes, one file per auditor.
+	// resource instead of streaming every record to the writer. This is the form a
+	// parallel audit consumes, one file per auditor.
 	OutDir string
 }
 
@@ -186,8 +186,8 @@ type Indexer struct {
 	errOut  io.Writer
 }
 
-// NewIndexer returns an Indexer that writes records to out and progress notes to
-// errOut. The GitHub token is optional and only raises the rate limit when
+// NewIndexer returns an Indexer that writes records to out and progress notes
+// to errOut. The GitHub token is optional and only raises the rate limit when
 // fetching models from raw.githubusercontent.com.
 func NewIndexer(githubToken string, out, errOut io.Writer) *Indexer {
 	return &Indexer{
@@ -208,9 +208,10 @@ func NewIndexerWithFetcher(f ModelFetcher, out, errOut io.Writer) *Indexer {
 //
 // A resource declared in generator.yaml with no generated CRD yields a skipped
 // Result rather than a failure: the resource is legitimately not indexable, and
-// the caller needs to know it was not assessed rather than have the batch abort.
-// A model that cannot be fetched degrades every resource of that controller to a
-// model-free index and is reported as a note, again without failing.
+// the caller needs to know it was not assessed rather than have the batch
+// abort. A model that cannot be fetched degrades every resource of that
+// controller to a model-free index and is reported as a note, again without
+// failing.
 func (ix *Indexer) Candidates(ctx context.Context, a app.App, opts CandidatesOptions) (workspace.Summary, error) {
 	controller := opts.Controller
 	if controller == "" {
@@ -250,8 +251,8 @@ func (ix *Indexer) Candidates(ctx context.Context, a app.App, opts CandidatesOpt
 
 	// Only failures are returned in the Summary. The command renders its own
 	// per-resource progress on stderr and its records on stdout, so a Summary the
-	// entrypoint would print for a successful run corrupts the record stream —
-	// but a failure still has to reach the process exit code.
+	// entrypoint would print for a successful run corrupts the record stream — but
+	// a failure still has to reach the process exit code.
 	var summary workspace.Summary
 	for _, r := range results {
 		if r.Outcome == workspace.OutcomeFailed {
@@ -302,8 +303,8 @@ func (ix *Indexer) indexController(
 		idx, err := ix.buildResourceIndex(c, res, modelName, modelAvailable, docs, suppressed)
 		if err != nil {
 			// A resource declared in generator.yaml without a generated CRD is not
-			// indexable. That is a fact about the repo, not a failure of this run,
-			// and the caller must be able to tell it apart from a clean index.
+			// indexable. That is a fact about the repo, not a failure of this run, and
+			// the caller must be able to tell it apart from a clean index.
 			results = append(results, workspace.Result{
 				Repo:    label,
 				Outcome: workspace.OutcomeSkipped,
@@ -346,8 +347,8 @@ func (ix *Indexer) buildResourceIndex(
 ) (ResourceIndex, error) {
 	var index docIndex
 	if modelAvailable {
-		// A resource whose spec sources cannot be read still yields a usable
-		// index; it simply loses the model documentation.
+		// A resource whose spec sources cannot be read still yields a usable index;
+		// it simply loses the model documentation.
 		if built, err := docs.indexFor(c.Path, resource); err == nil {
 			index = built
 		}
@@ -375,8 +376,8 @@ func (ix *Indexer) buildResourceIndex(
 
 // candidateRecords builds the candidate records for one resource: every
 // string-valued spec field of its CRD, marked from generator.yaml and enriched
-// from the model documentation. A zero docIndex is valid and leaves model-sourced
-// descriptions and patterns empty.
+// from the model documentation. A zero docIndex is valid and leaves
+// model-sourced descriptions and patterns empty.
 func candidateRecords(repoPath, resource string, docs docIndex) ([]CandidateRecord, error) {
 	spec, records, err := walkedSpecFieldRecords(repoPath, resource)
 	if err != nil {
@@ -466,7 +467,8 @@ func marshalCandidateLines(records []CandidateRecord) (string, error) {
 
 // reportResource prints the per-resource progress line, which doubles as the
 // record of what the run covered. Configured references are counted separately
-// from unconfigured candidates because the second number is the audit's workload.
+// from unconfigured candidates because the second number is the audit's
+// workload.
 func (ix *Indexer) reportResource(idx ResourceIndex, opts CandidatesOptions) {
 	configured := 0
 	for _, r := range idx.Candidates {
@@ -486,8 +488,8 @@ func (ix *Indexer) reportResource(idx ResourceIndex, opts CandidatesOptions) {
 		idx.Controller+"/"+idx.Resource, len(idx.Candidates), configured, model, dest)
 }
 
-// notef writes a progress or diagnostic line to the Indexer's note writer. Notes
-// go to stderr so they never corrupt the records on stdout.
+// notef writes a progress or diagnostic line to the Indexer's note writer.
+// Notes go to stderr so they never corrupt the records on stdout.
 func (ix *Indexer) notef(format string, args ...any) {
 	if ix.errOut == nil {
 		return
@@ -541,8 +543,8 @@ func loadReferenceTargets(repoPath, resource string) (map[string]string, error) 
 	return out, nil
 }
 
-// generatorIgnore decodes the ignore.field_paths list, the fields generator.yaml
-// removes from the CRD entirely.
+// generatorIgnore decodes the ignore.field_paths list, the fields
+// generator.yaml removes from the CRD entirely.
 type generatorIgnore struct {
 	Ignore struct {
 		FieldPaths []string `yaml:"field_paths"`
@@ -614,10 +616,10 @@ func suppressedHiddenIdentifiers(m smithyModel, path string) []string {
 // never reaches the CRD, so it cannot appear among the candidates however the
 // index is built — and suppressions do hide real references (mq removes
 // CreateBrokerInput.DataReplicationPrimaryBrokerArn, a Broker-to-Broker
-// reference). Reporting them is what stops an empty gap list from being read as a
-// clean resource. Note that a suppressed field is not fixable with a references
-// block at all: un-ignoring it is a separate, larger change, because a reference
-// cannot target a field absent from the CRD.
+// reference). Reporting them is what stops an empty gap list from being read as
+// a clean resource. Note that a suppressed field is not fixable with a
+// references block at all: un-ignoring it is a separate, larger change, because
+// a reference cannot target a field absent from the CRD.
 func suppressedIdentifierFields(repoPath string, docs modelDocs) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))
 	if err != nil {
@@ -633,9 +635,9 @@ func suppressedIdentifierFields(repoPath string, docs modelDocs) ([]string, erro
 			out = append(out, p)
 			continue
 		}
-		// The path itself does not look like an identifier, but it may name a
-		// struct whose members do. Requires the model, so this half is skipped
-		// when it could not be fetched.
+		// The path itself does not look like an identifier, but it may name a struct
+		// whose members do. Requires the model, so this half is skipped when it could
+		// not be fetched.
 		if len(docs.model.Shapes) == 0 {
 			continue
 		}
@@ -647,8 +649,8 @@ func suppressedIdentifierFields(repoPath string, docs modelDocs) ([]string, erro
 	return out, nil
 }
 
-// looksLikeIdentifier reports whether a dotted field path's final segment ends in
-// an identifier suffix, compared case-insensitively so it catches both the
+// looksLikeIdentifier reports whether a dotted field path's final segment ends
+// in an identifier suffix, compared case-insensitively so it catches both the
 // model's "KmsKeyId" and ACK's "KMSKeyID".
 func looksLikeIdentifier(path string) bool {
 	segment := path

@@ -8,7 +8,8 @@ import (
 )
 
 // buildDocIndex resolves the model documentation for one resource of one
-// controller in a single call: decode the model, then index it for the resource.
+// controller in a single call: decode the model, then index it for the
+// resource.
 //
 // The Indexer separates those two steps so a controller's model is decoded once
 // and indexed per resource, so this convenience exists only for tests, which
@@ -22,17 +23,17 @@ func buildDocIndex(modelJSON, repoPath, resource string) (docIndex, error) {
 }
 
 // lookup returns the model's documentation for a CRD field path, discarding the
-// join provenance. Production code reads the provenance (it is recorded on every
-// candidate record), so only these tests, which assert on the documentation
-// alone, have a use for the narrower form.
+// join provenance. Production code reads the provenance (it is recorded on
+// every candidate record), so only these tests, which assert on the
+// documentation alone, have a use for the narrower form.
 func (d docIndex) lookup(path string) (smithyDoc, bool) {
 	doc, _, ok := d.lookupOrigin(path)
 	return doc, ok
 }
 
 // writeControllerRepoWithGenerator creates a controller checkout whose
-// generator.yaml is caller-supplied, for the cases (renames, custom field source
-// operations) that need configuration the shared fixture does not carry.
+// generator.yaml is caller-supplied, for the cases (renames, custom field
+// source operations) that need configuration the shared fixture does not carry.
 func writeControllerRepoWithGenerator(t *testing.T, root, name, generator string) string {
 	t.Helper()
 	repo := filepath.Join(root, name)
@@ -145,7 +146,7 @@ func TestUnambiguousMemberDocsRejectsAmbiguity(t *testing.T) {
 	}
 	// "Description" is declared twice with different text, so the member-name
 	// fallback must refuse it: attaching an arbitrary one of several meanings to a
-	// field would mislead the agent more than leaving the description empty.
+	// field would mislead a reader more than leaving the description empty.
 	if _, ok := idx.byMember["description"]; ok {
 		t.Error("an ambiguous member name must not enter the fallback index")
 	}
@@ -190,8 +191,9 @@ func sortedPaths(idx docIndex) []string {
 }
 
 // customFieldModel exercises the two shapes a custom field can name: an
-// operation input published by the model under the "Request" suffix, and a plain
-// struct. generator.yaml uses the older SDK's "Input" spelling for the former.
+// operation input published by the model under the "Request" suffix, and a
+// plain struct. generator.yaml uses the older SDK's "Input" spelling for the
+// former.
 const customFieldModel = `{
   "smithy": "2.0",
   "shapes": {
@@ -226,8 +228,9 @@ const customFieldModel = `{
 }`
 
 // A custom field declares a shape, not an operation, and its members become a
-// nested subtree of the spec. Those subtrees carry no CRD description at all, so
-// if the walk does not mount them every field in them is judgeable by name alone.
+// nested subtree of the spec. Those subtrees carry no CRD description at all,
+// so if the walk does not mount them every field in them is judgeable by name
+// alone.
 func TestBuildDocIndexMountsCustomFieldShape(t *testing.T) {
 	root := t.TempDir()
 	generator := `resources:
@@ -356,9 +359,9 @@ func TestBuildDocIndexScopesRenamesPerOperation(t *testing.T) {
 }
 
 // Model member casing is inconsistent across services — cloudwatchlogs declares
-// "logGroupName" while sagemaker declares "ExecutionRoleArn" — so a rename keyed
-// on generator.yaml's PascalCase must match case-insensitively or the field lands
-// at its pre-rename path where nothing looks for it.
+// "logGroupName" while sagemaker declares "ExecutionRoleArn" — so a rename
+// keyed on generator.yaml's PascalCase must match case-insensitively or the
+// field lands at its pre-rename path where nothing looks for it.
 func TestBuildDocIndexRenamesMatchMemberCaseInsensitively(t *testing.T) {
 	root := t.TempDir()
 	model := `{
@@ -396,10 +399,11 @@ func TestBuildDocIndexRenamesMatchMemberCaseInsensitively(t *testing.T) {
 }
 
 // Several roots can contribute the same field path, and walkShape resolves that
-// by keeping whichever arrived first with documentation. Iterating the shape map
-// directly would make the winner depend on Go's map order, so two runs over an
-// unchanged repo could disagree — which defeats the point of a reproducible
-// index. Create must sort first because it is the operation that defines the spec.
+// by keeping whichever arrived first with documentation. Iterating the shape
+// map directly would make the winner depend on Go's map order, so two runs over
+// an unchanged repo could disagree — which defeats the point of a reproducible
+// index. Create must sort first because it is the operation that defines the
+// spec.
 func TestRootShapesOrderIsDeterministicCreateFirst(t *testing.T) {
 	md, err := newModelDocs(renamesPerOperationModel)
 	if err != nil {

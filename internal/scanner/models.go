@@ -24,15 +24,15 @@ type ModelFetcher interface {
 }
 
 // modelsRawBaseURL is the raw location of the aws-sdk-go-v2 Smithy API models.
-// The model name and ".json" suffix are appended. The scanner reads the models
-// from the SDK's main branch, mirroring how the Terraform docs are read from
-// their provider's main branch; the exact SDK version a controller was
-// generated against is not needed to reason about which fields are references.
+// The model name and ".json" suffix are appended. Models are read from the
+// SDK's main branch: the exact SDK version a controller was generated against
+// is not needed to reason about which fields are references.
 const modelsRawBaseURL = "https://raw.githubusercontent.com/aws/aws-sdk-go-v2/main/codegen/sdk-codegen/aws-models/"
 
-// maxModelBytes caps how much of a single model is read from the network. Smithy
-// models range from a few KB to several MB (EC2 is the largest at well under
-// 32MB), so this is a generous defensive bound rather than an expected limit.
+// maxModelBytes caps how much of a single model is read from the network.
+// Smithy models range from a few KB to several MB (EC2 is the largest at well
+// under 32MB), so this is a generous defensive bound rather than an expected
+// limit.
 const maxModelBytes = 32 * 1024 * 1024
 
 // httpModelFetcher is the production ModelFetcher: it downloads model JSON over
@@ -40,8 +40,8 @@ const maxModelBytes = 32 * 1024 * 1024
 // conversation (and across a controller's resources) do not refetch.
 type httpModelFetcher struct {
 	client *http.Client
-	// token, when non-empty, authenticates the raw GitHub request. Raw content
-	// is public, so this is only about staying clear of anonymous rate limits.
+	// token, when non-empty, authenticates the raw GitHub request. Raw content is
+	// public, so this is only about staying clear of anonymous rate limits.
 	token string
 	// rawBaseURL is the model endpoint; it is a field (defaulting to the package
 	// constant) so tests can point the fetcher at an httptest server.
@@ -52,8 +52,8 @@ type httpModelFetcher struct {
 }
 
 // newHTTPModelFetcher returns a ModelFetcher backed by an HTTP client with a
-// conservative timeout and an empty model cache. A non-empty token authenticates
-// the request to avoid throttling.
+// conservative timeout and an empty model cache. A non-empty token
+// authenticates the request to avoid throttling.
 func newHTTPModelFetcher(token string) ModelFetcher {
 	return &httpModelFetcher{
 		client:     &http.Client{Timeout: 30 * time.Second},

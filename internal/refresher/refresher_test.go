@@ -69,8 +69,8 @@ func scriptedRunner(opts map[string]scriptOptions) *git.MockRunner {
 		}
 		switch args[0] {
 		case "fetch":
-			// `fetch origin` (2 args) updates the fork tracking ref; `fetch
-			// upstream --tags` (3 args) pulls upstream commits and tags.
+			// `fetch origin` (2 args) updates the fork tracking ref; `fetch upstream
+			// --tags` (3 args) pulls upstream commits and tags.
 			if len(args) >= 2 && args[1] == originRemote {
 				return "", o.originFetchErr
 			}
@@ -251,8 +251,8 @@ func TestRefresh_OriginFetchFailure(t *testing.T) {
 	if !strings.Contains(res.Reason, "origin") {
 		t.Errorf("expected reason to mention origin, got %q", res.Reason)
 	}
-	// The origin fetch is the final step, so the local reconcile must have
-	// already completed before it was attempted.
+	// The origin fetch is the final step, so the local reconcile must have already
+	// completed before it was attempted.
 	if !findCall(runner, dir, "reset", "--hard", "upstream/main") {
 		t.Errorf("expected local reset before origin fetch, calls=%v", callsInDir(runner, dir))
 	}

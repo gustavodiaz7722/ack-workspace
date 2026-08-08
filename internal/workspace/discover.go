@@ -6,15 +6,14 @@ import (
 	"sort"
 )
 
-// Discover lists the Managed_Repositories found directly under root: immediate
+// Discover lists the managed repositories found directly under root: immediate
 // subdirectories that are git repositories (that is, they contain a ".git"
 // entry, whether a directory or a worktree gitfile). The returned names are the
-// repository directory names, sorted alphabetically (Requirement 6.1).
+// repository directory names, sorted alphabetically.
 //
 // A non-existent root is treated as an empty workspace: Discover returns an
 // empty slice and a nil error so callers (such as the status command) can emit
-// a friendly "no managed repositories" message rather than failing
-// (Requirement 6.7).
+// a friendly "no managed repositories" message rather than failing.
 func Discover(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {

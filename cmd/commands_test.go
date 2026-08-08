@@ -38,10 +38,10 @@ func (f *fakeChecker) Check(need prereq.Need, cfg config.Config) error {
 	return f.err
 }
 
-// recorder captures whether each fake component runner was invoked and with what
-// arguments, so the tests can assert the commands parse positional args and
-// flags correctly and delegate. The runErr and summary fields let a test script
-// a component's return.
+// recorder captures whether each fake component runner was invoked and with
+// what arguments, so the tests can assert the commands parse positional args
+// and flags correctly and delegate. The runErr and summary fields let a test
+// script a component's return.
 type recorder struct {
 	initCalled bool
 
@@ -141,9 +141,10 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 	}
 }
 
-// isolateEnv points $HOME at a temporary directory and clears the identity/token
-// environment variables so configuration resolution is deterministic and never
-// reads a real config file. It returns the temporary home.
+// isolateEnv points $HOME at a temporary directory and clears the
+// identity/token environment variables so configuration resolution is
+// deterministic and never reads a real config file. It returns the temporary
+// home.
 func isolateEnv(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -196,8 +197,8 @@ func TestPrerequisiteNeedPerCommand(t *testing.T) {
 		},
 		{
 			// attribution reads the checked-out branch and lists remote refs, so it
-			// needs git. It must NOT declare Identity: --upstream and --repo remove
-			// the need for a fork owner, and declaring it would block those paths.
+			// needs git. It must NOT declare Identity: --upstream and --repo remove the
+			// need for a fork owner, and declaring it would block those paths.
 			name: "attribution needs git only",
 			args: []string{"attribution", "ecr", "--" + config.FlagGitHubUser, "octocat"},
 			want: prereq.Need{Git: true},
@@ -327,8 +328,8 @@ func TestAddParsesIdentifiers(t *testing.T) {
 
 func TestAddEmptyIdentifierListSurfacesUsageError(t *testing.T) {
 	isolateEnv(t)
-	// Use the real Controller_Adder so the empty-list rule (Requirement 4.2) is
-	// enforced where it lives. A passing checker isolates the adder's behavior.
+	// Use the real adder so the empty-list rule is enforced where it lives. A
+	// passing checker isolates the adder's behavior.
 	d := defaultDeps()
 	d.checker = &fakeChecker{}
 
@@ -468,7 +469,7 @@ func TestConfigSetPersistsAndGetReadsBack(t *testing.T) {
 }
 
 func TestConfigGetMissingIdentityErrors(t *testing.T) {
-	// No config file and no identity supplied: resolution fails (Requirement 2.7).
+	// No config file and no identity supplied: resolution fails.
 	isolateEnv(t)
 	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, &recorder{}), "config", "get")
 	if err == nil {
@@ -652,8 +653,8 @@ func TestRelease_ParsesServiceAndFlags(t *testing.T) {
 
 func TestRelease_MissingVersionSurfacesUsageError(t *testing.T) {
 	isolateEnv(t)
-	// Use the real Controller_Releaser so the version-required rule is enforced
-	// where it lives. A passing checker isolates the releaser's behavior.
+	// Use the real releaser so the version-required rule is enforced where it
+	// lives. A passing checker isolates the releaser's behavior.
 	d := defaultDeps()
 	d.checker = &fakeChecker{}
 
@@ -717,8 +718,8 @@ func TestBuild_ParsesServiceAndSDKVersion(t *testing.T) {
 
 func TestBuild_EmptyServiceSurfacesUsageError(t *testing.T) {
 	isolateEnv(t)
-	// Use the real Controller_Builder so the service-required rule is enforced
-	// where it lives. A passing checker isolates the builder's behavior.
+	// Use the real builder so the service-required rule is enforced where it
+	// lives. A passing checker isolates the builder's behavior.
 	d := defaultDeps()
 	d.checker = &fakeChecker{}
 
@@ -875,8 +876,8 @@ func TestCandidatesCommandDeclaresNoPrerequisites(t *testing.T) {
 	}
 }
 
-// More than one positional argument is a usage error: the controller selector is
-// a single value (or "all").
+// More than one positional argument is a usage error: the controller selector
+// is a single value (or "all").
 func TestCandidatesCommandRejectsExtraArgs(t *testing.T) {
 	rec := &recorder{}
 	if _, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec), "candidates", "eks", "s3"); err == nil {

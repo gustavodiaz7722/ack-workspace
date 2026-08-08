@@ -45,8 +45,8 @@ func TestBuildSource_OnlyChangedFlagsIncluded(t *testing.T) {
 		t.Errorf("Source.Flags[%q] = %q (present=%v), want %q", config.FlagConcurrency, got, ok, "8")
 	}
 
-	// Flags that were not set must be absent so they do not override persisted
-	// or environment values (Requirement 2.4).
+	// Flags that were not set must be absent so they do not override persisted or
+	// environment values.
 	for _, name := range []string{
 		config.FlagWorkspaceRoot,
 		config.FlagRepoPrefix,

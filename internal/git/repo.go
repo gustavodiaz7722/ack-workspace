@@ -10,18 +10,17 @@ import (
 )
 
 // Repo composes a Runner into the high-level git operations the feature
-// components (initializer, adder, refresher, inspector) need. It binds a single
-// on-disk repository (Path) to the Runner that executes git within it, so
-// callers can build a Repo around an existing checkout with an injected Runner
-// (real or mock) and drive clone/remote/fetch/compare/fast-forward/push flows.
+// components need. It binds a single on-disk repository (Path) to the Runner
+// that executes git within it, so callers can build a Repo around an existing
+// checkout with an injected Runner (real or mock) and drive
+// clone/remote/fetch/compare/fast-forward/push flows.
 //
-// Every method maps to a stable git plumbing command (see the design's "Git
-// plumbing mapping"); the parsing here is deliberately tolerant of trailing
-// whitespace so it behaves identically against real git output and scripted
-// mock output.
+// Every method maps to a stable git plumbing command; the parsing here is
+// deliberately tolerant of trailing whitespace so it behaves identically
+// against real git output and scripted mock output.
 type Repo struct {
-	// Path is the absolute filesystem path of the repository working tree. All
-	// of this Repo's git commands run with this directory as their working dir.
+	// Path is the absolute filesystem path of the repository working tree. All of
+	// this Repo's git commands run with this directory as their working dir.
 	Path string
 	// runner executes the underlying git commands. It is injected so tests can
 	// substitute a recording mock.
@@ -35,20 +34,14 @@ func NewRepo(path string, runner Runner) *Repo {
 	return &Repo{Path: path, runner: runner}
 }
 
-// Runner returns the Runner backing this Repo. It is exposed so callers can
-// issue additional ad-hoc commands through the same seam when needed.
-func (r *Repo) Runner() Runner { return r.runner }
-
 // ExitError reports that a git command terminated with a non-zero exit status
 // and carries the numeric exit Code. It lets callers distinguish a meaningful
 // non-zero exit (for example `git merge-base --is-ancestor` returning 1 to mean
 // "not an ancestor") from a genuine execution failure (a missing repository,
 // bad revision, etc., which use higher exit codes).
 //
-// The production ExecRunner wraps the standard library's *exec.ExitError with
-// %w, so its exit code is already reachable via errors.As; tests using
-// MockRunner can return an *ExitError directly to simulate a specific exit
-// status. exitCodeOf understands both representations.
+// A real git failure arrives as a wrapped *exec.ExitError and a simulated one
+// as an *ExitError; exitCodeOf reads the code from either.
 type ExitError struct {
 	// Code is the process exit status reported by git.
 	Code int
@@ -68,12 +61,9 @@ func (e *ExitError) Error() string {
 func (e *ExitError) Unwrap() error { return e.Err }
 
 // exitCodeOf extracts a git process exit code from an error returned by a
-// Runner. It looks through the wrapped chain for either this package's
-// *ExitError (returned by tests) or the standard library's *exec.ExitError
-// (wrapped by ExecRunner), returning the code and true when one is found.
-//
-// This is the single place that interprets "what exit code did git return",
-// so the same logic applies whether the command ran for real or through a mock.
+// Runner, accepting either representation, so the callers that treat a specific
+// exit code as an answer rather than a failure behave the same under a real git
+// and a mock.
 func exitCodeOf(err error) (int, bool) {
 	var ge *ExitError
 	if errors.As(err, &ge) {
@@ -122,18 +112,16 @@ func (r *Repo) Fetch(ctx context.Context, remote string) error {
 	return nil
 }
 
-// CurrentBranch reports the checked-out branch name. It runs
-// `git symbolic-ref --short -q HEAD`; an empty result means HEAD does not point
-// at a branch, i.e. a detached HEAD state, in which case it returns
-// ("", true, nil). The -q flag makes git exit with status 1 (and no output) on
-// a detached HEAD, which is treated as the detached case rather than an error;
-// any other non-zero exit is surfaced as a real error.
+// CurrentBranch reports the checked-out branch name. It runs `git symbolic-ref
+// --short -q HEAD`; an empty result means HEAD does not point at a branch, i.e.
+// a detached HEAD state, in which case it returns ("", true, nil). The -q flag
+// makes git exit with status 1 (and no output) on a detached HEAD, which is
+// treated as the detached case rather than an error; any other non-zero exit is
+// surfaced as a real error.
 func (r *Repo) CurrentBranch(ctx context.Context) (name string, detached bool, err error) {
 	out, runErr := r.runner.Run(ctx, r.Path, "symbolic-ref", "--short", "-q", "HEAD")
-	// Handle the error first: git may write diagnostic text to the combined
-	// output, so the output is only a trustworthy branch name when the command
-	// succeeded. A detached HEAD makes `symbolic-ref -q` exit with status 1 and
-	// no branch name; any other non-zero exit is a genuine failure.
+	// Check the error first: git may write diagnostics to the combined output, so
+	// it is only a trustworthy branch name when the command succeeded.
 	if runErr != nil {
 		if code, ok := exitCodeOf(runErr); ok && code == 1 {
 			return "", true, nil
@@ -148,12 +136,11 @@ func (r *Repo) CurrentBranch(ctx context.Context) (name string, detached bool, e
 	return name, false, nil
 }
 
-// HeadSHA returns the abbreviated commit SHA of HEAD by running
-// `git rev-parse --short HEAD`. It identifies the exact local commit an artifact
-// (for example a controller image) is built from, so the checked-out
-// implementation branch can be tagged reproducibly. An empty result with no
-// error is treated as a failure since HEAD must always resolve in a valid
-// repository.
+// HeadSHA returns the abbreviated commit SHA of HEAD by running `git rev-parse
+// --short HEAD`. It identifies the exact local commit an artifact (for example
+// a controller image) is built from, so a build can be tagged reproducibly from
+// whatever is checked out. An empty result with no error is treated as a
+// failure since HEAD must always resolve in a valid repository.
 func (r *Repo) HeadSHA(ctx context.Context) (string, error) {
 	out, err := r.runner.Run(ctx, r.Path, "rev-parse", "--short", "HEAD")
 	if err != nil {
@@ -168,7 +155,7 @@ func (r *Repo) HeadSHA(ctx context.Context) (string, error) {
 
 // IsDirty reports whether the working tree has uncommitted changes (modified,
 // staged, or untracked files). It runs `git status --porcelain`; any non-empty
-// output means the tree is dirty (a Dirty_Working_Tree).
+// output means the tree is dirty (a dirty working tree).
 func (r *Repo) IsDirty(ctx context.Context) (bool, error) {
 	out, err := r.runner.Run(ctx, r.Path, "status", "--porcelain")
 	if err != nil {
@@ -178,10 +165,10 @@ func (r *Repo) IsDirty(ctx context.Context) (bool, error) {
 }
 
 // AheadBehind returns how many commits localRef is ahead of and behind
-// upstreamRef. It runs `git rev-list --left-right --count <local>...<upstream>`,
-// whose output is two integers: the left count (commits reachable from localRef
-// but not upstreamRef, i.e. ahead) and the right count (commits reachable from
-// upstreamRef but not localRef, i.e. behind).
+// upstreamRef. It runs `git rev-list --left-right --count
+// <local>...<upstream>`, whose output is two integers: the left count (commits
+// reachable from localRef but not upstreamRef, i.e. ahead) and the right count
+// (commits reachable from upstreamRef but not localRef, i.e. behind).
 func (r *Repo) AheadBehind(ctx context.Context, localRef, upstreamRef string) (ahead, behind int, err error) {
 	spec := localRef + "..." + upstreamRef
 	out, runErr := r.runner.Run(ctx, r.Path, "rev-list", "--left-right", "--count", spec)
@@ -204,15 +191,13 @@ func (r *Repo) AheadBehind(ctx context.Context, localRef, upstreamRef string) (a
 }
 
 // CanFastForward reports whether localRef can be fast-forwarded to upstreamRef,
-// i.e. whether localRef is an ancestor of upstreamRef. It runs
-// `git merge-base --is-ancestor <local> <upstream>`, which exits 0 when localRef
-// is an ancestor (fast-forward possible) and exits 1 when it is not.
+// i.e. whether localRef is an ancestor of upstreamRef. It runs `git merge-base
+// --is-ancestor <local> <upstream>`, which exits 0 when localRef is an ancestor
+// (fast-forward possible) and exits 1 when it is not.
 //
-// The exit-1 "not an ancestor" case is a normal, expected answer and is
-// reported as (false, nil); it must not be conflated with a real git failure
-// (such as an unknown revision), which produces a higher exit code or a
-// non-exit error and is surfaced as (false, err). exitCodeOf is what makes that
-// distinction reliable for both the real ExecRunner and the test MockRunner.
+// The exit-1 "not an ancestor" case is a normal answer, reported as (false,
+// nil). It must not be conflated with a real git failure such as an unknown
+// revision, which exits with a higher code and is surfaced as (false, err).
 func (r *Repo) CanFastForward(ctx context.Context, localRef, upstreamRef string) (bool, error) {
 	_, err := r.runner.Run(ctx, r.Path, "merge-base", "--is-ancestor", localRef, upstreamRef)
 	if err == nil {
@@ -253,11 +238,11 @@ func (r *Repo) FetchWithTags(ctx context.Context, remote string) error {
 	return nil
 }
 
-// ResetHard discards all uncommitted changes to tracked files by running
-// `git reset --hard`, returning the working tree and index to the current
-// branch's HEAD. It is a destructive operation: staged and unstaged
-// modifications to tracked files are lost. Untracked files are not touched by
-// reset; use Clean to remove those as well.
+// ResetHard discards all uncommitted changes to tracked files by running `git
+// reset --hard`, returning the working tree and index to the current branch's
+// HEAD. It is a destructive operation: staged and unstaged modifications to
+// tracked files are lost. Untracked files are not touched by reset; use Clean
+// to remove those as well.
 func (r *Repo) ResetHard(ctx context.Context) error {
 	if _, err := r.runner.Run(ctx, r.Path, "reset", "--hard"); err != nil {
 		return fmt.Errorf("reset --hard: %w", err)
@@ -279,8 +264,8 @@ func (r *Repo) ResetHardTo(ctx context.Context, ref string) error {
 
 // Clean removes untracked files and directories by running `git clean -fd`
 // (force, including directories). It is destructive: untracked content that is
-// not ignored is deleted. Together with ResetHard it returns the working tree to
-// a pristine state so a branch switch cannot be blocked by local changes.
+// not ignored is deleted. Together with ResetHard it returns the working tree
+// to a pristine state so a branch switch cannot be blocked by local changes.
 func (r *Repo) Clean(ctx context.Context) error {
 	if _, err := r.runner.Run(ctx, r.Path, "clean", "-fd"); err != nil {
 		return fmt.Errorf("clean -fd: %w", err)
@@ -297,9 +282,9 @@ func (r *Repo) Push(ctx context.Context, remote, branch string) error {
 	return nil
 }
 
-// Checkout switches the working tree to an existing branch by running
-// `git checkout <branch>`. It is used to move onto the base branch before a
-// release run.
+// Checkout switches the working tree to an existing branch by running `git
+// checkout <branch>`: onto the base branch before a release, and onto the
+// default branch during a refresh.
 func (r *Repo) Checkout(ctx context.Context, branch string) error {
 	if _, err := r.runner.Run(ctx, r.Path, "checkout", branch); err != nil {
 		return fmt.Errorf("checkout %q: %w", branch, err)
@@ -307,9 +292,9 @@ func (r *Repo) Checkout(ctx context.Context, branch string) error {
 	return nil
 }
 
-// CheckoutNewBranch creates branch and switches to it by running
-// `git checkout -b <branch>`. It fails if the branch already exists, so callers
-// that want to skip an existing branch should consult LocalBranchExists first.
+// CheckoutNewBranch creates branch and switches to it by running `git checkout
+// -b <branch>`. It fails if the branch already exists, so callers that want to
+// skip an existing branch should consult LocalBranchExists first.
 func (r *Repo) CheckoutNewBranch(ctx context.Context, branch string) error {
 	if _, err := r.runner.Run(ctx, r.Path, "checkout", "-b", branch); err != nil {
 		return fmt.Errorf("create branch %q: %w", branch, err)
@@ -319,8 +304,8 @@ func (r *Repo) CheckoutNewBranch(ctx context.Context, branch string) error {
 
 // LocalBranchExists reports whether a local branch named branch exists. It runs
 // `git rev-parse --verify --quiet refs/heads/<branch>`, which exits 0 when the
-// ref resolves and 1 when it does not; the exit-1 case is reported as
-// (false, nil) rather than an error, mirroring CanFastForward's handling of the
+// ref resolves and 1 when it does not; the exit-1 case is reported as (false,
+// nil) rather than an error, mirroring CanFastForward's handling of the
 // "expected non-zero exit" answer. Any other non-zero exit is surfaced as an
 // error.
 func (r *Repo) LocalBranchExists(ctx context.Context, branch string) (bool, error) {
@@ -334,10 +319,11 @@ func (r *Repo) LocalBranchExists(ctx context.Context, branch string) (bool, erro
 	return false, fmt.Errorf("checking local branch %q: %w", branch, err)
 }
 
-// CommitAll stages every tracked, modified file and records a commit in one step
-// by running `git commit -a -m <message>`. It is used to capture the generated
-// release artifacts in a single commit; it fails (like git itself) when there is
-// nothing staged to commit, so callers should confirm the tree is dirty first.
+// CommitAll stages every tracked, modified file and records a commit in one
+// step by running `git commit -a -m <message>`. It is used to capture the
+// generated release artifacts in a single commit; it fails (like git itself)
+// when there is nothing staged to commit, so callers should confirm the tree is
+// dirty first.
 func (r *Repo) CommitAll(ctx context.Context, message string) error {
 	if _, err := r.runner.Run(ctx, r.Path, "commit", "-a", "-m", message); err != nil {
 		return fmt.Errorf("commit: %w", err)

@@ -43,7 +43,7 @@ func resultsByRepo(s workspace.Summary) map[string]workspace.Result {
 	return out
 }
 
-// markForksPresent registers all three Common_Repository forks as already
+// markForksPresent registers all three core repository forks as already
 // existing under the test user, so the flow does not need to create them.
 func markForksPresent(m *githubclient.Mock) {
 	for _, name := range CommonRepositories {
@@ -90,8 +90,8 @@ func TestInit_AllCreated(t *testing.T) {
 
 func TestInit_SkipExistingDirectory(t *testing.T) {
 	root := t.TempDir()
-	// Pre-create the runtime directory: it must be skipped regardless of
-	// contents, and never deleted.
+	// Pre-create the runtime directory: it must be skipped regardless of contents,
+	// and never deleted.
 	runtimeDir := filepath.Join(root, "runtime")
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -168,8 +168,8 @@ func TestInit_ForkCreateFailure(t *testing.T) {
 		t.Fatalf("Init returned unexpected error: %v", err)
 	}
 
-	// All repos fail (fork creation fails) but every repo is still
-	// processed (failure isolation).
+	// All repos fail (fork creation fails) but every repo is still processed
+	// (failure isolation).
 	if got := len(sum.Results); got != len(CommonRepositories) {
 		t.Fatalf("expected %d results, got %d", len(CommonRepositories), got)
 	}
@@ -223,9 +223,9 @@ func TestInit_RemoteConfigFailureCleansUp(t *testing.T) {
 	gh := githubclient.NewMock()
 	markForksPresent(gh)
 
-	// Clone succeeds (creating the directory) but configuring a remote fails.
-	// Both `remote set-url` and the `remote add` fallback fail, so SetRemote
-	// returns an error and the cloned directory must be removed.
+	// Clone succeeds (creating the directory) but configuring a remote fails. Both
+	// `remote set-url` and the `remote add` fallback fail, so SetRemote returns an
+	// error and the cloned directory must be removed.
 	runner := &git.MockRunner{}
 	runner.ResponseFunc = func(_ string, args []string) (string, error) {
 		if len(args) == 0 {
@@ -333,10 +333,10 @@ func assertNoMutatingGitCalls(t *testing.T, runner *git.MockRunner) {
 	}
 }
 
-// TestInit_DryRunNoMutationsForkPresent verifies Requirements 8.4/8.5 and
-// Property 6: with forks already present, dry-run computes a per-repo preview
-// (OutcomeCreated with a "would ..." reason) using only read-only operations,
-// invoking no CreateFork and no mutating git command.
+// TestInit_DryRunNoMutationsForkPresent verifies that with forks already
+// present, dry-run computes a per-repo preview (OutcomeCreated with a "would
+// ..." reason) using only read-only operations, invoking no CreateFork and no
+// mutating git command.
 func TestInit_DryRunNoMutationsForkPresent(t *testing.T) {
 	root := t.TempDir()
 	gh := githubclient.NewMock()
@@ -348,7 +348,7 @@ func TestInit_DryRunNoMutationsForkPresent(t *testing.T) {
 		t.Fatalf("Init returned unexpected error: %v", err)
 	}
 
-	// Preview output is still produced: a result per Common_Repository.
+	// Preview output is still produced: a result per core repository.
 	if got := len(sum.Results); got != len(CommonRepositories) {
 		t.Fatalf("expected %d results, got %d", len(CommonRepositories), got)
 	}

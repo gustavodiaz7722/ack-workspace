@@ -27,8 +27,8 @@ const (
 // unless --dry-run or --yes is given the command requires an interactive
 // confirmation. It deletes git via the filesystem and the fork via the GitHub
 // API, and inspects the working tree for the dirty-check, so it declares the
-// git, token, and identity prerequisites (Requirements 1.1, 1.3, 1.5, 1.7). The
-// remover refuses to delete anything owned by the upstream organization.
+// git, token, and identity prerequisites. The remover refuses to delete
+// anything owned by the upstream organization.
 func newRemoveCommand(d deps, res *Result) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove [identifiers...|all]",
@@ -51,8 +51,8 @@ func newRemoveCommand(d deps, res *Result) *cobra.Command {
 			force, _ := cmd.Flags().GetBool(flagForce)
 			yes, _ := cmd.Flags().GetBool(flagYes)
 
-			// Require explicit confirmation for the destructive action, unless
-			// the user opted out with --yes or is only previewing with --dry-run.
+			// Require explicit confirmation for the destructive action, unless the user
+			// opted out with --yes or is only previewing with --dry-run.
 			if !a.DryRun && !yes {
 				ok, cerr := confirmRemoval(cmd, args, keepFork)
 				if cerr != nil {
@@ -79,8 +79,9 @@ func newRemoveCommand(d deps, res *Result) *cobra.Command {
 }
 
 // confirmRemoval prints a warning describing the destructive action and reads a
-// confirmation line from the command's input. It returns true only when the user
-// types "yes". Input/output go through the cobra command so tests can drive them.
+// confirmation line from the command's input. It returns true only when the
+// user types "yes". Input/output go through the cobra command so tests can
+// drive them.
 func confirmRemoval(cmd *cobra.Command, identifiers []string, keepFork bool) (bool, error) {
 	target := describeTargets(identifiers)
 	what := "local clone(s) and GitHub fork(s)"

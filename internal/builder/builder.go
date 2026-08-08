@@ -1,6 +1,6 @@
-// Package builder implements the Controller_Builder, which regenerates a service
-// controller's code from its local (checked-out) source by running the
-// code-generator's `make build-controller` target:
+// Package builder regenerates a service controller's code from its local
+// (checked-out) source by running the code-generator's `make build-controller`
+// target:
 //
 //  1. locate the controller and the code-generator in the workspace,
 //  2. read the controller's currently checked-out branch (for reporting only),
@@ -11,24 +11,25 @@
 // Like the deployer, the builder never touches git history: it regenerates
 // against whatever the controller repository currently has checked out so a
 // developer can iterate on local generator.yaml or hook-template changes. It is
-// deliberately conservative about reporting: every execution problem is captured
-// as a failed Result rather than returned out-of-band, and in dry-run mode it
-// reports the command it would run and touches nothing.
+// deliberately conservative about reporting: every execution problem is
+// captured as a failed Result rather than returned out-of-band, and in dry-run
+// mode it reports the command it would run and touches nothing.
 //
 // # Why the environment overrides are required
 //
 // `make build-controller` runs two scripts that locate their sibling repos
-// inconsistently. build-controller.sh (core generation) defaults RUNTIME_CRD_DIR
-// to "<code-generator>/../../aws-controllers-k8s/runtime/config", and
-// build-controller-release.sh (the Helm/release step) additionally defaults both
-// ACK_GENERATE_BIN_PATH and TEMPLATES_DIR to
-// "<code-generator>/../../aws-controllers-k8s/code-generator/...". Those relative
-// paths assume the workspace root directory is named "aws-controllers-k8s", so a
-// workspace rooted anywhere else makes the scripts fail with "No such file or
-// directory" (RUNTIME_CRD_DIR) or "Unable to find an ack-generate binary"
-// (ACK_GENERATE_BIN_PATH). The builder resolves all three against the real
-// workspace root and exports them so the full build succeeds regardless of the
-// root's name.
+// inconsistently. build-controller.sh (core generation) defaults
+// RUNTIME_CRD_DIR to
+// "<code-generator>/../../aws-controllers-k8s/runtime/config", and
+// build-controller-release.sh (the Helm/release step) additionally defaults
+// both ACK_GENERATE_BIN_PATH and TEMPLATES_DIR to
+// "<code-generator>/../../aws-controllers-k8s/code-generator/...". Those
+// relative paths assume the workspace root directory is named
+// "aws-controllers-k8s", so a workspace rooted anywhere else makes the scripts
+// fail with "No such file or directory" (RUNTIME_CRD_DIR) or "Unable to find an
+// ack-generate binary" (ACK_GENERATE_BIN_PATH). The builder resolves all three
+// against the real workspace root and exports them so the full build succeeds
+// regardless of the root's name.
 package builder
 
 import (
@@ -50,20 +51,19 @@ const (
 	// repository name. A bare alias ("ecr") and its full form ("ecr-controller")
 	// both normalize to the same repository.
 	controllerSuffix = "-controller"
-	// codegenDirName is the directory under the workspace root that holds the
-	// ACK code-generator (its Makefile, scripts, and generated ack-generate
-	// binary).
+	// codegenDirName is the directory under the workspace root that holds the ACK
+	// code-generator (its Makefile, scripts, and generated ack-generate binary).
 	codegenDirName = "code-generator"
-	// runtimeDirName is the directory under the workspace root that holds the
-	// ACK runtime (its config/crd tree is copied in during generation).
+	// runtimeDirName is the directory under the workspace root that holds the ACK
+	// runtime (its config/crd tree is copied in during generation).
 	runtimeDirName = "runtime"
 	// makeTarget is the code-generator Makefile target that regenerates a
 	// controller's code, CRDs, RBAC, and Helm chart in one shot.
 	makeTarget = "build-controller"
 
 	// The following are the environment-variable names the code-generator build
-	// scripts read to locate their sibling repos. The builder sets each one so
-	// the scripts resolve against the real workspace root rather than a path that
+	// scripts read to locate their sibling repos. The builder sets each one so the
+	// scripts resolve against the real workspace root rather than a path that
 	// assumes the root is named "aws-controllers-k8s".
 
 	// envRuntimeCRDDir points build-controller.sh at the runtime's config dir.
@@ -95,20 +95,20 @@ func (e *UsageError) Error() string { return e.Msg }
 // running the actual code-generator.
 type MakeRunner interface {
 	// Run executes `make build-controller` for service in codegenDir (the
-	// code-generator directory), with env (a list of "KEY=VALUE" entries)
-	// appended to the inherited process environment.
+	// code-generator directory), with env (a list of "KEY=VALUE" entries) appended
+	// to the inherited process environment.
 	Run(ctx context.Context, codegenDir, service string, env []string) error
 }
 
 // Options controls build behavior. All fields are optional.
 type Options struct {
 	// SDKVersion, when non-empty, pins the aws-sdk-go version passed to the
-	// code-generator via AWS_SDK_GO_VERSION. When empty the code-generator
-	// scripts resolve it from the controller's ack-generate-metadata.yaml.
+	// code-generator via AWS_SDK_GO_VERSION. When empty the code-generator scripts
+	// resolve it from the controller's ack-generate-metadata.yaml.
 	SDKVersion string
 }
 
-// Builder implements the Controller_Builder.
+// Builder regenerates a controller's generated code.
 type Builder struct {
 	maker MakeRunner
 }
@@ -126,9 +126,8 @@ func NewWithMakeRunner(m MakeRunner) *Builder {
 	return &Builder{maker: m}
 }
 
-// Build regenerates the controller named by service from its local
-// implementation branch and returns a single-result Summary recording the
-// outcome (built or failed).
+// Build regenerates the controller named by service from its local checkout and
+// returns a single-result Summary recording the outcome (built or failed).
 //
 // The returned error is non-nil only for a pre-flight validation failure (an
 // empty service identifier); all execution problems are captured as a failed
@@ -152,8 +151,8 @@ func (b *Builder) process(ctx context.Context, ap app.App, alias string, opts Op
 	controllerPath := filepath.Join(root, name)
 	codegenPath := filepath.Join(root, codegenDirName)
 
-	// Pre-flight: the controller and the code-generator must already be present
-	// in the workspace. Building neither forks nor clones.
+	// Pre-flight: the controller and the code-generator must already be present in
+	// the workspace. Building neither forks nor clones.
 	if !dirExists(controllerPath) {
 		return failed(name, fmt.Errorf("controller %s not found at %s; add it first with `ack-workspace add %s`", name, controllerPath, alias))
 	}
@@ -168,8 +167,8 @@ func (b *Builder) process(ctx context.Context, ap app.App, alias string, opts Op
 	// against whatever is currently checked out; it never switches branches.
 	branch := b.describeBranch(ctx, controllerPath, ap.Git)
 
-	// The environment overrides that make the code-generator scripts resolve
-	// their sibling repos against the real workspace root (see the package doc).
+	// The environment overrides that make the code-generator scripts resolve their
+	// sibling repos against the real workspace root (see the package doc).
 	env := buildEnv(root, opts)
 
 	// Dry-run: report the command that would be run without executing anything.
@@ -186,10 +185,10 @@ func (b *Builder) process(ctx context.Context, ap app.App, alias string, opts Op
 		name, branch, makeTarget, alias))
 }
 
-// describeBranch returns a human-readable label for the controller's checked-out
-// state ("branch <name>", "detached HEAD", or "unknown branch" when it cannot be
-// determined). It never fails the build: the branch is reported for context
-// only.
+// describeBranch returns a human-readable label for the controller's
+// checked-out state ("branch <name>", "detached HEAD", or "unknown branch" when
+// it cannot be determined). It never fails the build: the branch is reported
+// for context only.
 func (b *Builder) describeBranch(ctx context.Context, controllerPath string, runner git.Runner) string {
 	repo := git.NewRepo(controllerPath, runner)
 	name, detached, err := repo.CurrentBranch(ctx)
@@ -213,8 +212,8 @@ func (b *Builder) preview(name, alias, branch, codegenPath string, env []string)
 
 // buildEnv assembles the "KEY=VALUE" environment overrides the code-generator
 // build scripts need when the workspace root is not literally
-// ".../aws-controllers-k8s". SERVICE is passed as a make argument rather than an
-// environment entry (see execMakeRunner.Run), so it is not included here.
+// ".../aws-controllers-k8s". SERVICE is passed as a make argument rather than
+// an environment entry (see execMakeRunner.Run), so it is not included here.
 func buildEnv(root string, opts Options) []string {
 	env := []string{
 		envRuntimeCRDDir + "=" + filepath.Join(root, runtimeDirName, "config"),
@@ -227,17 +226,17 @@ func buildEnv(root string, opts Options) []string {
 	return env
 }
 
-// execMakeRunner is the production MakeRunner. It invokes
-// `make build-controller SERVICE=<service>` with the working directory set to
-// the code-generator directory and the supplied overrides appended to the
-// inherited environment.
+// execMakeRunner is the production MakeRunner. It invokes `make
+// build-controller SERVICE=<service>` with the working directory set to the
+// code-generator directory and the supplied overrides appended to the inherited
+// environment.
 type execMakeRunner struct{}
 
 // Run executes `make build-controller SERVICE=<service>` in codegenDir with env
 // appended to the inherited process environment. SERVICE is passed as a make
 // variable assignment so the Makefile's $(SERVICE) resolves, while the path
-// overrides travel through the environment where the build scripts read them. On
-// failure it surfaces any make/script output to aid debugging.
+// overrides travel through the environment where the build scripts read them.
+// On failure it surfaces any make/script output to aid debugging.
 func (execMakeRunner) Run(ctx context.Context, codegenDir, service string, env []string) error {
 	cmd := exec.CommandContext(ctx, "make", makeTarget, envService+"="+service)
 	cmd.Dir = codegenDir

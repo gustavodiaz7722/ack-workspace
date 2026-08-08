@@ -16,10 +16,10 @@ import (
 // The Smithy model is the only place a nested CRD field's documentation exists.
 // ACK's code-generator propagates a field's description into the CRD for
 // top-level spec fields but not for nested ones, so a nested field arrives in
-// the field index as a bare {path, type} record with nothing for the agent to
-// reason about. This file rebuilds that missing documentation by walking the
-// service's Smithy model the same way the code-generator does and joining the
-// result onto CRD field paths.
+// the index as a bare {path, type} record with nothing to reason about. This
+// file rebuilds that missing documentation by walking the service's Smithy
+// model the same way the code-generator does and joining the result onto CRD
+// field paths.
 //
 // The join is exact rather than heuristic: the code-generator derives a CRD
 // property name from a model member with names.New(member).CamelLower (see
@@ -29,14 +29,14 @@ import (
 
 // maxShapeDepth bounds the model walk. Smithy shape graphs are recursive (a
 // shape can transitively contain itself), and the visited-set below breaks true
-// cycles, but a depth ceiling also stops the walk from enumerating pathologically
-// deep structures that the CRD does not contain either.
+// cycles, but a depth ceiling also stops the walk from enumerating
+// pathologically deep structures that the CRD does not contain either.
 const maxShapeDepth = 8
 
-// smithyDoc is what the model knows about one field: its documentation and, when
-// the member's target shape constrains it, the validation pattern. The pattern is
-// the strongest available reference signal because an ARN pattern names the
-// target service and resource type outright (for example
+// smithyDoc is what the model knows about one field: its documentation and,
+// when the member's target shape constrains it, the validation pattern. The
+// pattern is the strongest available reference signal because an ARN pattern
+// names the target service and resource type outright (for example
 // "^arn:aws[a-z\-]*:iam::\d{12}:role/?...$").
 type smithyDoc struct {
 	Description string
@@ -75,8 +75,8 @@ type smithyMember struct {
 //     restricted to member names carrying a single distinct documentation string
 //     across the whole model; 39.6% of member names in the models measured are
 //     ambiguous (Description appears with 99 different meanings, State with 112),
-//     and attaching an arbitrary one of those to a field would mislead the agent
-//     more than leaving the description empty.
+//     and attaching an arbitrary one of those to a field would mislead a reader
+//     more than an empty description would.
 type docIndex struct {
 	byPath   map[string]smithyDoc
 	byMember map[string]smithyDoc
@@ -183,9 +183,9 @@ func (md modelDocs) indexFor(repoPath, resource string) (docIndex, error) {
 		if !ok {
 			continue
 		}
-		// No renames apply inside a mounted shape: generator.yaml renames are
-		// scoped to an operation's *input* fields, and walkShape only consults them
-		// at a root's top level (path == "") anyway.
+		// No renames apply inside a mounted shape: generator.yaml renames are scoped
+		// to an operation's *input* fields, and walkShape only consults them at a
+		// root's top level (path == "") anyway.
 		m.walkShape(full, prefix, 0, map[string]bool{}, nil, idx.byPath)
 	}
 
@@ -207,8 +207,8 @@ func (md modelDocs) indexFor(repoPath, resource string) (docIndex, error) {
 }
 
 // rootShapes returns the structure shapes whose members become the resource's
-// spec fields: the resource's own Create operation input, plus the input of every
-// operation a generator.yaml custom field sources from.
+// spec fields: the resource's own Create operation input, plus the input of
+// every operation a generator.yaml custom field sources from.
 //
 // The second group matters more than its size suggests. ACK synthesizes spec
 // fields out of unrelated operations — lambda's Alias resource carries
@@ -276,8 +276,8 @@ func operationForShape(shapeName string) string {
 // qualified name in the model, comparing case-insensitively on the local part.
 //
 // It also reconciles the operation-shape naming split: generator.yaml uses the
-// older SDK's "<Operation>Input" convention (cloudwatchlogs declares
-// `list_of: PutSubscriptionFilterInput`) while the Smithy models publish
+// older SDK's "<Operation>Input" convention (cloudwatchlogs declares `list_of:
+// PutSubscriptionFilterInput`) while the Smithy models publish
 // "<Operation>Request" (or, rarely, "<Operation>Message"). A name ending in one
 // of those suffixes is retried with the others, so a custom field naming an
 // operation shape resolves either way. Plain struct names (IpPermission,
@@ -308,8 +308,8 @@ func (m smithyModel) findShape(name string) (string, bool) {
 // walkShape descends a structure or union shape, recording one entry per member
 // keyed by the dotted CRD path. Members are named with
 // names.New(member).CamelLower, the transform the code-generator uses for the
-// field's JSON tag, and list shapes are unwrapped onto the same path because ACK
-// flattens an array's element fields rather than indexing them.
+// field's JSON tag, and list shapes are unwrapped onto the same path because
+// ACK flattens an array's element fields rather than indexing them.
 func (m smithyModel) walkShape(
 	shapeName, path string,
 	depth int,
@@ -328,8 +328,8 @@ func (m smithyModel) walkShape(
 	defer delete(visiting, shapeName)
 
 	for memberName, member := range shape.Members {
-		// generator.yaml renames apply to an operation's input fields, so only
-		// the top level of a root shape is subject to them.
+		// generator.yaml renames apply to an operation's input fields, so only the
+		// top level of a root shape is subject to them.
 		effective := memberName
 		if path == "" {
 			if renamed, ok := renames[strings.ToLower(memberName)]; ok {
@@ -346,16 +346,16 @@ func (m smithyModel) walkShape(
 			Pattern:     m.targetPattern(member.Target),
 		}
 		if doc.Description == "" {
-			// A member without its own documentation is effectively documented by
-			// the shape it targets, which is where AWS puts the description for
-			// shared value types.
+			// A member without its own documentation is effectively documented by the
+			// shape it targets, which is where AWS puts the description for shared value
+			// types.
 			if target, ok := m.Shapes[member.Target]; ok {
 				doc.Description = traitDoc(target.Traits)
 			}
 		}
 		// Several root shapes can contribute the same path (Create and a custom
-		// field's source operation often share members). Prefer whichever
-		// actually carries documentation.
+		// field's source operation often share members). Prefer whichever actually
+		// carries documentation.
 		if existing, seen := out[fieldPath]; !seen || (existing.Description == "" && doc.Description != "") {
 			out[fieldPath] = doc
 		}
@@ -365,8 +365,8 @@ func (m smithyModel) walkShape(
 }
 
 // resolveStruct follows list shapes to their element shape and reports the
-// resulting structure or union. A non-aggregate shape (a string, an enum, a map)
-// has no members to walk and yields false.
+// resulting structure or union. A non-aggregate shape (a string, an enum, a
+// map) has no members to walk and yields false.
 func (m smithyModel) resolveStruct(shapeName string) (string, smithyShape, bool) {
 	for i := 0; i <= maxShapeDepth; i++ {
 		shape, ok := m.Shapes[shapeName]
@@ -386,9 +386,9 @@ func (m smithyModel) resolveStruct(shapeName string) (string, smithyShape, bool)
 }
 
 // targetPattern returns the smithy.api#pattern constraint on a member's target
-// shape, if any. For an identifier field this is often an ARN template that names
-// the referenced service and resource type explicitly, which is the single
-// strongest signal that a field is a cross-resource reference.
+// shape, if any. For an identifier field this is often an ARN template that
+// names the referenced service and resource type explicitly, which is the
+// single strongest signal that a field is a cross-resource reference.
 func (m smithyModel) targetPattern(target string) string {
 	shape, ok := m.Shapes[target]
 	if !ok {
@@ -405,11 +405,11 @@ func (m smithyModel) targetPattern(target string) string {
 	return pattern
 }
 
-// unambiguousMemberDocs indexes documentation by member name, keeping only names
-// that mean the same thing everywhere they appear. A member name carrying more
-// than one distinct documentation string across the model is dropped: the index
-// is a fallback for fields the structural walk missed, and a wrong description is
-// worse than none.
+// unambiguousMemberDocs indexes documentation by member name, keeping only
+// names that mean the same thing everywhere they appear. A member name carrying
+// more than one distinct documentation string across the model is dropped: the
+// index is a fallback for fields the structural walk missed, and a wrong
+// description is worse than none.
 func unambiguousMemberDocs(m smithyModel) map[string]smithyDoc {
 	type candidate struct {
 		doc      smithyDoc
@@ -457,11 +457,11 @@ func traitDoc(traits map[string]json.RawMessage) string {
 	return cleanDoc(doc)
 }
 
-// cleanDoc renders a Smithy documentation trait as plain prose: AWS writes these
-// as HTML fragments (`<p>The ARN of an IAM role...</p>`, with `<code>` and `<a>`
-// markup inline), and the tags are noise in an index a human or a model reads.
-// Tags are dropped, entities unescaped, and runs of whitespace collapsed so a
-// description occupies one line.
+// cleanDoc renders a Smithy documentation trait as plain prose: AWS writes
+// these as HTML fragments (`<p>The ARN of an IAM role...</p>`, with `<code>`
+// and `<a>` markup inline), and the tags are noise in an index a human or a
+// model reads. Tags are dropped, entities unescaped, and runs of whitespace
+// collapsed so a description occupies one line.
 func cleanDoc(doc string) string {
 	var b strings.Builder
 	b.Grow(len(doc))
@@ -484,8 +484,8 @@ func cleanDoc(doc string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(b.String())), " ")
 }
 
-// specSources is the generator.yaml configuration that affects how model members
-// map onto CRD field paths for one resource.
+// specSources is the generator.yaml configuration that affects how model
+// members map onto CRD field paths for one resource.
 type specSources struct {
 	// renames maps a lowercased operation name to that operation's input-field
 	// renames (generator.yaml renames.operations.<Op>.input_fields), themselves
@@ -536,9 +536,10 @@ type generatorSpecSources struct {
 	} `yaml:"resources"`
 }
 
-// loadSpecSources reads the resource's renames and custom-field source operations
-// from generator.yaml. Both are optional; a resource that configures neither
-// yields empty values and the walk proceeds from the Create input shape alone.
+// loadSpecSources reads the resource's renames and custom-field source
+// operations from generator.yaml. Both are optional; a resource that configures
+// neither yields empty values and the walk proceeds from the Create input shape
+// alone.
 func loadSpecSources(repoPath, resource string) (specSources, error) {
 	data, err := os.ReadFile(filepath.Join(repoPath, generatorFileName))
 	if err != nil {
@@ -558,12 +559,12 @@ func loadSpecSources(repoPath, resource string) (specSources, error) {
 		for opName, op := range rc.Renames.Operations {
 			byMember := map[string]string{}
 			for original, renamed := range op.InputFields {
-				// Keyed lowercased: generator.yaml names the field in the API's
-				// PascalCase ("LogGroupName") while models are inconsistent about
-				// member casing — cloudwatchlogs declares "logGroupName", sagemaker
-				// declares "ExecutionRoleArn". An exact-case lookup silently fails to
-				// rename on half the fleet, and the field then lands at its
-				// pre-rename path where nothing will ever look for it.
+				// Keyed lowercased: generator.yaml names the field in the API's PascalCase
+				// ("LogGroupName") while models are inconsistent about member casing —
+				// cloudwatchlogs declares "logGroupName", sagemaker declares
+				// "ExecutionRoleArn". An exact-case lookup silently fails to rename on half
+				// the fleet, and the field then lands at its pre-rename path where nothing
+				// will ever look for it.
 				byMember[strings.ToLower(original)] = renamed
 			}
 			out.renames[strings.ToLower(opName)] = byMember
