@@ -1,5 +1,5 @@
-// Package scanner implements the `candidates` feature: it emits the
-// deterministic cross-resource-reference candidate index for a resource — every
+// Package candidates emits the deterministic cross-resource-reference candidate
+// index for a resource — every
 // string-valued CRD spec field, fused with the generator.yaml markings that
 // bear on whether the field is a reference and with the service API model's
 // documentation and validation patterns.
@@ -13,7 +13,7 @@
 //
 // The package reads CRDs and generator.yaml from disk and fetches Smithy models
 // over HTTP; it needs no AWS credentials.
-package scanner
+package candidates
 
 import (
 	"context"
@@ -60,7 +60,7 @@ func resolveResources(c controllerRef, selector string) ([]string, error) {
 	return discoverResources(c.Path)
 }
 
-// CandidateRecord is one cross-resource-reference candidate field: a
+// Record is one cross-resource-reference candidate field: a
 // string-valued spec field of a resource's CRD, fused with the generator.yaml
 // markings that bear on whether it is a reference and with the API model's
 // documentation and validation pattern.
@@ -71,7 +71,7 @@ func resolveResources(c controllerRef, selector string) ([]string, error) {
 // string or a list of strings, so object and non-string scalar fields are never
 // candidates. The ACK-generated "<name>Ref" companion structures are dropped as
 // well — they are controller plumbing, not API fields.
-type CandidateRecord struct {
+type Record struct {
 	// Resource is the resource Kind the field belongs to. It is carried on every
 	// record so a merged multi-resource stream stays interpretable.
 	Resource string `json:"resource"`
@@ -132,7 +132,7 @@ type CandidateRecord struct {
 	IsPrimaryKey bool `json:"is_primary_key"`
 }
 
-// Description provenance values recorded on a CandidateRecord.
+// Description provenance values recorded on a Record.
 const (
 	descriptionSourceCRD   = "crd"
 	descriptionSourceModel = "model"
@@ -152,7 +152,7 @@ type ResourceIndex struct {
 	// documentation and patterns, leaving them judgeable by name alone.
 	ModelAvailable bool `json:"model_available"`
 	// Candidates are the resource's candidate fields, ordered by path.
-	Candidates []CandidateRecord `json:"candidates"`
+	Candidates []Record `json:"candidates"`
 	// Suppressed are identifier-looking fields that generator.yaml removes from
 	// the CRD via ignore.field_paths. They can never appear among Candidates
 	// however the index is built, and a suppression can hide a reference, so an
@@ -162,8 +162,8 @@ type ResourceIndex struct {
 	Suppressed []string `json:"suppressed,omitempty"`
 }
 
-// CandidatesOptions selects what to index and where to write it.
-type CandidatesOptions struct {
+// Options selects what to index and where to write it.
+type Options struct {
 	// Controller is a controller alias, its full "<alias>-controller" form, or All
 	// to index every controller under the workspace root.
 	Controller string
@@ -212,7 +212,7 @@ func NewIndexerWithFetcher(f ModelFetcher, out, errOut io.Writer) *Indexer {
 // abort. A model that cannot be fetched degrades every resource of that
 // controller to a model-free index and is reported as a note, again without
 // failing.
-func (ix *Indexer) Candidates(ctx context.Context, a app.App, opts CandidatesOptions) (workspace.Summary, error) {
+func (ix *Indexer) Candidates(ctx context.Context, a app.App, opts Options) (workspace.Summary, error) {
 	controller := opts.Controller
 	if controller == "" {
 		controller = All
@@ -271,7 +271,7 @@ func (ix *Indexer) indexController(
 	a app.App,
 	c controllerRef,
 	resources []string,
-	opts CandidatesOptions,
+	opts Options,
 ) []workspace.Result {
 	modelName := resolveModelName(c.Path, c.Alias)
 
@@ -378,7 +378,7 @@ func (ix *Indexer) buildResourceIndex(
 // string-valued spec field of its CRD, marked from generator.yaml and enriched
 // from the model documentation. A zero docIndex is valid and leaves
 // model-sourced descriptions and patterns empty.
-func candidateRecords(repoPath, resource string, docs docIndex) ([]CandidateRecord, error) {
+func candidateRecords(repoPath, resource string, docs docIndex) ([]Record, error) {
 	spec, records, err := walkedSpecFieldRecords(repoPath, resource)
 	if err != nil {
 		return nil, err
@@ -394,10 +394,10 @@ func candidateRecords(repoPath, resource string, docs docIndex) ([]CandidateReco
 		return nil, err
 	}
 
-	out := make([]CandidateRecord, 0, len(records))
+	out := make([]Record, 0, len(records))
 	for _, r := range records {
 		norm := strings.ToLower(r.Path)
-		rec := CandidateRecord{
+		rec := Record{
 			Resource:     resource,
 			Path:         r.Path,
 			Type:         r.Type,
@@ -429,7 +429,7 @@ func candidateRecords(repoPath, resource string, docs docIndex) ([]CandidateReco
 
 // emit writes one resource's records, either to a per-resource file under
 // OutDir or as a stream on the Indexer's writer.
-func (ix *Indexer) emit(idx ResourceIndex, opts CandidatesOptions) error {
+func (ix *Indexer) emit(idx ResourceIndex, opts Options) error {
 	body, err := marshalCandidateLines(idx.Candidates)
 	if err != nil {
 		return err
@@ -452,7 +452,7 @@ func (ix *Indexer) emit(idx ResourceIndex, opts CandidatesOptions) error {
 // marshalCandidateLines renders the records as JSON Lines: one self-contained
 // JSON object per line, so a consumer can grep whole records and read the file
 // incrementally.
-func marshalCandidateLines(records []CandidateRecord) (string, error) {
+func marshalCandidateLines(records []Record) (string, error) {
 	var b strings.Builder
 	for _, r := range records {
 		line, err := json.Marshal(r)
@@ -469,7 +469,7 @@ func marshalCandidateLines(records []CandidateRecord) (string, error) {
 // record of what the run covered. Configured references are counted separately
 // from unconfigured candidates because the second number is the audit's
 // workload.
-func (ix *Indexer) reportResource(idx ResourceIndex, opts CandidatesOptions) {
+func (ix *Indexer) reportResource(idx ResourceIndex, opts Options) {
 	configured := 0
 	for _, r := range idx.Candidates {
 		if r.IsReference {

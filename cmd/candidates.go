@@ -3,8 +3,8 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/aws-controllers-k8s/ack-workspace/internal/candidates"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
-	"github.com/aws-controllers-k8s/ack-workspace/internal/scanner"
 )
 
 const (
@@ -54,14 +54,14 @@ func newCandidatesCommand(d deps, res *Result) *cobra.Command {
 				return err
 			}
 
-			controller := scanner.All
+			controller := candidates.All
 			if len(args) > 0 {
 				controller = args[0]
 			}
 			resource, _ := cmd.Flags().GetString(flagResource)
 			outDir, _ := cmd.Flags().GetString(flagOutDir)
 
-			opts := scanner.CandidatesOptions{
+			opts := candidates.Options{
 				Controller: controller,
 				Resource:   resource,
 				OutDir:     outDir,
@@ -74,7 +74,7 @@ func newCandidatesCommand(d deps, res *Result) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().String(flagResource, scanner.All, "resource within the controller to index, or \"all\"")
+	cmd.Flags().String(flagResource, candidates.All, "resource within the controller to index, or \"all\"")
 	cmd.Flags().String(flagOutDir, "", "write one <Resource>.jsonl per resource under this directory instead of streaming to stdout")
 	return cmd
 }

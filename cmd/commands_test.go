@@ -13,12 +13,12 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/attributor"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/builder"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/candidates"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
-	"github.com/aws-controllers-k8s/ack-workspace/internal/scanner"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -80,7 +80,7 @@ type recorder struct {
 	deployOpts    deployer.Options
 
 	candidatesCalled bool
-	candidatesOpts   scanner.CandidatesOptions
+	candidatesOpts   candidates.Options
 
 	summary workspace.Summary
 	runErr  error
@@ -110,7 +110,7 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 			rec.statusJSON = jsonOut
 			return rec.summary, rec.runErr
 		},
-		candidatesRun: func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error) {
+		candidatesRun: func(ctx context.Context, a app.App, opts candidates.Options, out, errOut io.Writer) (workspace.Summary, error) {
 			rec.candidatesCalled = true
 			rec.candidatesOpts = opts
 			return rec.summary, rec.runErr
@@ -867,11 +867,11 @@ func TestCandidatesCommandDefaultsToAll(t *testing.T) {
 	if !rec.candidatesCalled {
 		t.Fatal("candidatesRun was not called")
 	}
-	if rec.candidatesOpts.Controller != scanner.All {
-		t.Errorf("Controller = %q, want %q", rec.candidatesOpts.Controller, scanner.All)
+	if rec.candidatesOpts.Controller != candidates.All {
+		t.Errorf("Controller = %q, want %q", rec.candidatesOpts.Controller, candidates.All)
 	}
-	if rec.candidatesOpts.Resource != scanner.All {
-		t.Errorf("Resource = %q, want %q", rec.candidatesOpts.Resource, scanner.All)
+	if rec.candidatesOpts.Resource != candidates.All {
+		t.Errorf("Resource = %q, want %q", rec.candidatesOpts.Resource, candidates.All)
 	}
 	if rec.candidatesOpts.OutDir != "" {
 		t.Errorf("OutDir = %q, want empty by default", rec.candidatesOpts.OutDir)

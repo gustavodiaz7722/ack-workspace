@@ -13,6 +13,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/attributor"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/builder"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/candidates"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/git"
@@ -23,7 +24,6 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/refresher"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
-	"github.com/aws-controllers-k8s/ack-workspace/internal/scanner"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -132,11 +132,11 @@ type deps struct {
 	// controller's code from local source via the code-generator's `make
 	// build-controller` target.
 	buildRun func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error)
-	// candidatesRun runs the scanner's Indexer for the candidates command: it
+	// candidatesRun runs the Indexer for the candidates command: it
 	// emits the deterministic cross-resource-reference candidate index. Records
 	// are written to out and progress/suppression notes to errOut, so stdout stays
 	// machine-readable.
-	candidatesRun func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error)
+	candidatesRun func(ctx context.Context, a app.App, opts candidates.Options, out, errOut io.Writer) (workspace.Summary, error)
 	// attributionRun runs the attributor for the attribution command: it generates
 	// each controller's ATTRIBUTION.md on ephemeral CodeBuild compute and writes
 	// the result into the local checkout. The writer receives the notice
@@ -181,8 +181,8 @@ func defaultDeps() deps {
 				SDKVersion: sdkVersion,
 			})
 		},
-		candidatesRun: func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error) {
-			return scanner.NewIndexer(a.Config.Token, out, errOut).Candidates(ctx, a, opts)
+		candidatesRun: func(ctx context.Context, a app.App, opts candidates.Options, out, errOut io.Writer) (workspace.Summary, error) {
+			return candidates.NewIndexer(a.Config.Token, out, errOut).Candidates(ctx, a, opts)
 		},
 		attributionRun: func(ctx context.Context, a app.App, identifiers []string, opts attributor.Options, region string, out io.Writer) (workspace.Summary, error) {
 			backend, err := attributor.NewCodeBuildBackend(ctx, region)

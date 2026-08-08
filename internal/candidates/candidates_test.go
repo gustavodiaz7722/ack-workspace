@@ -1,4 +1,4 @@
-package scanner
+package candidates
 
 import (
 	"bytes"
@@ -38,14 +38,14 @@ func (f *stubFetcher) FetchModel(context.Context, string) (string, error) {
 // decodeLines parses a JSON Lines body into records, failing the test if any
 // line is not a self-contained JSON object. That property is what lets a
 // consumer grep the index and read it incrementally.
-func decodeLines(t *testing.T, body string) []CandidateRecord {
+func decodeLines(t *testing.T, body string) []Record {
 	t.Helper()
-	var out []CandidateRecord
+	var out []Record
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		var r CandidateRecord
+		var r Record
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			t.Fatalf("line is not a JSON object: %q: %v", line, err)
 		}
@@ -54,13 +54,13 @@ func decodeLines(t *testing.T, body string) []CandidateRecord {
 	return out
 }
 
-func recordByPath(records []CandidateRecord, path string) (CandidateRecord, bool) {
+func recordByPath(records []Record, path string) (Record, bool) {
 	for _, r := range records {
 		if r.Path == path {
 			return r, true
 		}
 	}
-	return CandidateRecord{}, false
+	return Record{}, false
 }
 
 func TestCandidateRecordsFiltersAndMarkings(t *testing.T) {
@@ -266,7 +266,7 @@ func TestCandidatesStreamsJSONLines(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(&stubFetcher{model: testSmithyModel}, &out, &errOut)
-	summary, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	summary, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "acm",
 		Resource:   "Certificate",
 	})
@@ -296,7 +296,7 @@ func TestCandidatesWritesPerResourceFiles(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(&stubFetcher{model: testSmithyModel}, &out, &errOut)
-	if _, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	if _, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "acm",
 		Resource:   All,
 		OutDir:     outDir,
@@ -334,7 +334,7 @@ func TestCandidatesSkipsResourceWithoutCRD(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(&stubFetcher{model: testSmithyModel}, &out, &errOut)
-	summary, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	summary, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "acm",
 		Resource:   All,
 	})
@@ -356,7 +356,7 @@ func TestCandidatesDegradesWhenModelUnavailable(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(&stubFetcher{err: context.DeadlineExceeded}, &out, &errOut)
-	summary, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	summary, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "acm",
 		Resource:   "Certificate",
 	})
@@ -404,7 +404,7 @@ func TestCandidatesFetchesModelOncePerController(t *testing.T) {
 	f := &stubFetcher{model: testSmithyModel}
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(f, &out, &errOut)
-	if _, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	if _, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "acm",
 		Resource:   All,
 	}); err != nil {
@@ -428,7 +428,7 @@ resources:
 
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(&stubFetcher{model: testSmithyModel}, &out, &errOut)
-	if _, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	if _, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "acm",
 		Resource:   "Certificate",
 	}); err != nil {
@@ -455,7 +455,7 @@ func TestCandidatesDryRunWritesNothing(t *testing.T) {
 	ix := NewIndexerWithFetcher(&stubFetcher{model: testSmithyModel}, &out, &errOut)
 	a := testApp(root)
 	a.DryRun = true
-	summary, err := ix.Candidates(context.Background(), a, CandidatesOptions{
+	summary, err := ix.Candidates(context.Background(), a, Options{
 		Controller: "acm",
 		Resource:   All,
 		OutDir:     outDir,
@@ -478,7 +478,7 @@ func TestCandidatesUnknownController(t *testing.T) {
 	root := t.TempDir()
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(&stubFetcher{model: testSmithyModel}, &out, &errOut)
-	if _, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	if _, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "nope",
 		Resource:   All,
 	}); err == nil {
@@ -487,7 +487,7 @@ func TestCandidatesUnknownController(t *testing.T) {
 }
 
 func TestMarshalCandidateLinesOneObjectPerLine(t *testing.T) {
-	body, err := marshalCandidateLines([]CandidateRecord{
+	body, err := marshalCandidateLines([]Record{
 		{Resource: "Certificate", Path: "a", Type: "string"},
 		{Resource: "Certificate", Path: "b", Type: "array"},
 	})
@@ -499,7 +499,7 @@ func TestMarshalCandidateLinesOneObjectPerLine(t *testing.T) {
 		t.Fatalf("got %d lines, want 2: %q", len(lines), body)
 	}
 	for _, l := range lines {
-		var r CandidateRecord
+		var r Record
 		if err := json.Unmarshal([]byte(l), &r); err != nil {
 			t.Errorf("line %q is not a JSON object: %v", l, err)
 		}
@@ -521,7 +521,7 @@ func TestCandidatesSummaryCarriesOnlyFailures(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	ix := NewIndexerWithFetcher(&stubFetcher{model: testSmithyModel}, &out, &errOut)
-	summary, err := ix.Candidates(context.Background(), testApp(root), CandidatesOptions{
+	summary, err := ix.Candidates(context.Background(), testApp(root), Options{
 		Controller: "acm",
 		Resource:   "Certificate",
 		OutDir:     filepath.Join(outDir, "sub"),
