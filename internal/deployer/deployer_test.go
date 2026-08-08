@@ -105,10 +105,12 @@ func TestHelmUpgradeArgs_CoreArgs(t *testing.T) {
 	}
 }
 
-// TestHelmUpgradeArgs_NoServiceAccountByDefault pins that an unset
-// ServiceAccount leaves the chart's own service account handling untouched, so
-// the default deploy behavior is unchanged.
-func TestHelmUpgradeArgs_NoServiceAccountByDefault(t *testing.T) {
+// TestHelmUpgradeArgs_NoServiceAccountWhenUnset pins that the argument builder
+// only emits service-account overrides when it is given one, leaving the chart's
+// own handling alone otherwise. A deploy always names an account (the one the
+// cluster binds credentials to), so this covers the builder in isolation rather
+// than a reachable deploy path.
+func TestHelmUpgradeArgs_NoServiceAccountWhenUnset(t *testing.T) {
 	args := helmUpgradeArgs(DeployParams{
 		ChartDir:  "/charts/ecr",
 		Namespace: "ack-system",

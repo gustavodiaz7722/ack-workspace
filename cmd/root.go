@@ -123,9 +123,11 @@ type deps struct {
 	// releaseRun runs the Controller_Releaser for the release command.
 	releaseRun func(ctx context.Context, a app.App, service, version, baseBranch string, skipPR bool, prBody string) (workspace.Summary, error)
 	// deployRun runs the Controller_Deployer for the deploy command: it builds the
-	// controller from local source and deploys it to the current kubeconfig
-	// cluster.
-	deployRun func(ctx context.Context, a app.App, service, namespace, imageTag, repository, region, serviceAccount string) (workspace.Summary, error)
+	// controller from local source and deploys it to the target cluster, which is
+	// either the current kubeconfig context or a managed cluster deploy
+	// bootstraps. The knobs travel as a deployer.Options rather than a positional
+	// list so adding one does not ripple through this seam.
+	deployRun func(ctx context.Context, a app.App, service string, opts deployer.Options) (workspace.Summary, error)
 	// buildRun runs the Controller_Builder for the build command: it regenerates
 	// the controller's code from local source via the code-generator's
 	// `make build-controller` target.
@@ -176,14 +178,8 @@ func defaultDeps() deps {
 				PRBody:     prBody,
 			})
 		},
-		deployRun: func(ctx context.Context, a app.App, service, namespace, imageTag, repository, region, serviceAccount string) (workspace.Summary, error) {
-			return deployer.New().Deploy(ctx, a, service, deployer.Options{
-				Namespace:      namespace,
-				ImageTag:       imageTag,
-				Repository:     repository,
-				Region:         region,
-				ServiceAccount: serviceAccount,
-			})
+		deployRun: func(ctx context.Context, a app.App, service string, opts deployer.Options) (workspace.Summary, error) {
+			return deployer.New().Deploy(ctx, a, service, opts)
 		},
 		buildRun: func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error) {
 			return builder.New().Build(ctx, a, service, builder.Options{

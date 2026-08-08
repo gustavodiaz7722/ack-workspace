@@ -1,16 +1,24 @@
 // Package deployer implements the Controller_Deployer, which builds a service
-// controller from its local implementation branch and deploys it to the cluster
-// named by the caller's current kubeconfig context:
+// controller from its local implementation branch and deploys it to the shared
+// development cluster (deployer.ClusterName):
 //
-//  1. resolve the target cluster from the current kubeconfig context,
-//  2. resolve the caller's AWS account and region from the active credentials,
+//  1. resolve the caller's AWS account and region from the active credentials,
+//  2. bring the development cluster into the state a controller needs: create it
+//     (EKS Auto Mode plus an EKS Pod Identity association for the controller
+//     service account) when it does not exist, point the local kubeconfig at it,
+//     and ensure its service account and credential binding,
 //  3. ensure an ECR repository for the controller exists in that account,
 //     creating it when absent,
 //  4. build the controller image from the local (checked-out) source using the
 //     code-generator's build-controller-image.sh script, tagging it for ECR,
 //  5. push the image to ECR, and
-//  6. install or upgrade the controller's Helm chart on the current cluster,
-//     pointing it at the freshly pushed image.
+//  6. install or upgrade the controller's Helm chart on that cluster, pointing it
+//     at the freshly pushed image.
+//
+// The target cluster is not selectable and the current kubeconfig context is
+// never used as-is: step 2 repoints the kubeconfig on every deploy. That removes
+// the sharpest edge the command had, which was installing onto whatever cluster
+// happened to be selected.
 //
 // Unlike the releaser, the deployer never touches git history: it reads the
 // checked-out branch as-is so a developer can iterate on local changes. It is
@@ -89,13 +97,10 @@ type Registry interface {
 	PushImage(ctx context.Context, imageRef, region string) error
 }
 
-// Cluster deploys the controller to the cluster named by the current kubeconfig
-// context. It is the seam through which the real kubectl/helm invocations are
-// replaced in tests.
+// Cluster deploys the controller to the cluster the kubeconfig points at, which
+// the Provisioner has already repointed at the development cluster. It is the
+// seam through which the real helm invocation is replaced in tests.
 type Cluster interface {
-	// CurrentContext returns the active kubeconfig context name (the cluster a
-	// deploy targets).
-	CurrentContext(ctx context.Context) (string, error)
 	// Deploy installs or upgrades the controller's Helm chart as described by p.
 	Deploy(ctx context.Context, p DeployParams) error
 }
@@ -117,6 +122,15 @@ type Options struct {
 	// configured for. It defaults to the region resolved from the active AWS
 	// configuration when empty.
 	Region string
+	// ClusterVersion pins the Kubernetes version of the development cluster. It
+	// is only consulted when the cluster is actually created. When empty,
+	// eksctl's own default version is used.
+	ClusterVersion string
+	// PolicyARNs are the IAM policies attached to the cluster's pod identity
+	// role. They default to DefaultPolicyARN (AdministratorAccess), which suits a
+	// throwaway development account and nothing else. Like ClusterVersion, they
+	// only apply when the role has to be created.
+	PolicyARNs []string
 	// ServiceAccount names an existing Kubernetes service account for the
 	// controller to run under, instead of the one the chart creates by default
 	// ("ack-<service>-controller").
@@ -127,8 +141,11 @@ type Options struct {
 	// name. On a cluster that grants the controller credentials through either
 	// mechanism, a chart-created service account leaves the controller with no
 	// way to reach AWS and it exits at startup with "unable to determine account
-	// info: ... NoCredentialProviders". Pointing the deploy at the service account
-	// the cluster already binds credentials to avoids that.
+	// info: ... NoCredentialProviders".
+	//
+	// It defaults to SharedServiceAccount, the account the development cluster's
+	// pod identity association is attached to. Naming a different one makes the
+	// deploy create an association for that account instead.
 	ServiceAccount string
 }
 
@@ -155,28 +172,30 @@ type DeployParams struct {
 
 // Deployer implements the Controller_Deployer.
 type Deployer struct {
-	builder  Builder
-	registry Registry
-	cluster  Cluster
+	builder     Builder
+	registry    Registry
+	cluster     Cluster
+	provisioner Provisioner
 }
 
 // New returns a Deployer wired to the production toolchain: the code-generator
-// image build script, the aws/docker CLIs for ECR, and kubectl/helm for the
-// cluster. Constructing it performs no external work; that happens only when
-// Deploy runs.
+// image build script, the aws/docker CLIs for ECR, kubectl/helm for the cluster,
+// and eksctl for bootstrapping a managed development cluster. Constructing it
+// performs no external work; that happens only when Deploy runs.
 func New() *Deployer {
 	return &Deployer{
-		builder:  execBuilder{},
-		registry: execRegistry{},
-		cluster:  execCluster{},
+		builder:     execBuilder{},
+		registry:    execRegistry{},
+		cluster:     execCluster{},
+		provisioner: execProvisioner{},
 	}
 }
 
 // NewWith returns a Deployer backed by the supplied collaborators. It is intended
-// for tests that need to script build, registry, and cluster behavior without
-// invoking the real toolchain.
-func NewWith(b Builder, r Registry, c Cluster) *Deployer {
-	return &Deployer{builder: b, registry: r, cluster: c}
+// for tests that need to script build, registry, cluster, and provisioning
+// behavior without invoking the real toolchain.
+func NewWith(b Builder, r Registry, c Cluster, p Provisioner) *Deployer {
+	return &Deployer{builder: b, registry: r, cluster: c, provisioner: p}
 }
 
 // Deploy builds the controller named by service from its local implementation
@@ -234,18 +253,9 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		tag = sha
 	}
 
-	// Identify the target cluster from the current kubeconfig context. Doing this
-	// first means an unreachable or unset context fails before any image work.
-	kubeContext, err := d.cluster.CurrentContext(ctx)
-	if err != nil {
-		return failed(name, fmt.Errorf("determining current kubeconfig context: %w", err))
-	}
-	kubeContext = strings.TrimSpace(kubeContext)
-	if kubeContext == "" {
-		return failed(name, fmt.Errorf("no current kubeconfig context is set; select a cluster with `kubectl config use-context`"))
-	}
-
-	// Resolve the AWS account and region the image is pushed to.
+	// Resolve the AWS account and region the image is pushed to. This comes first
+	// because a managed cluster is looked up in that same account and region, so
+	// an unusable AWS configuration fails before any cluster or image work.
 	account, region, err := d.registry.Identity(ctx)
 	if err != nil {
 		return failed(name, fmt.Errorf("resolving AWS account and region: %w", err))
@@ -271,6 +281,14 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 	imageRepo := registryHost + "/" + repoName
 	imageRef := imageRepo + ":" + tag
 
+	// The cluster binds AWS credentials to one specific service account through
+	// its pod identity association, so default to that account rather than letting
+	// the chart create its own, which would carry no credentials.
+	serviceAccount := strings.TrimSpace(opts.ServiceAccount)
+	if serviceAccount == "" {
+		serviceAccount = SharedServiceAccount
+	}
+
 	params := DeployParams{
 		ChartDir:       chartPath,
 		Namespace:      namespace,
@@ -278,34 +296,49 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		ImageRepo:      imageRepo,
 		ImageTag:       tag,
 		Region:         region,
-		ServiceAccount: strings.TrimSpace(opts.ServiceAccount),
+		ServiceAccount: serviceAccount,
+	}
+
+	// Look up the development cluster. An inconclusive answer is a failure rather
+	// than an assumed "absent", so a credential or network problem never provokes
+	// a cluster creation.
+	clusterExisted, err := d.provisioner.ClusterExists(ctx, ClusterName, region)
+	if err != nil {
+		return failed(name, fmt.Errorf("checking whether cluster %q exists in %s: %w", ClusterName, region, err))
 	}
 
 	// Dry-run: report the steps that would be taken without mutating anything.
 	if ap.DryRun {
-		return d.preview(name, kubeContext, imageRef, params)
+		return d.preview(name, clusterExisted, imageRef, params)
 	}
 
-	// 1. Ensure the ECR repository exists, creating it in the current account
+	// 1. Bring the cluster into the state a controller needs: create it when
+	// absent, repoint the kubeconfig at it, and make sure the controller's
+	// service account exists and is bound to AWS credentials.
+	if err := d.provision(ctx, region, namespace, serviceAccount, opts, clusterExisted); err != nil {
+		return failed(name, err)
+	}
+
+	// 2. Ensure the ECR repository exists, creating it in the current account
 	// when absent.
 	created, err := d.registry.EnsureRepository(ctx, repoName, region)
 	if err != nil {
 		return failed(name, fmt.Errorf("ensuring ECR repository %q: %w", repoName, err))
 	}
 
-	// 2. Build the controller image from the local implementation source.
+	// 3. Build the controller image from the local implementation source.
 	if err := d.builder.Build(ctx, codegenPath, alias, imageRef); err != nil {
 		return failed(name, fmt.Errorf("building controller image: %w", err))
 	}
 
-	// 3. Push the image to ECR.
+	// 4. Push the image to ECR.
 	if err := d.registry.PushImage(ctx, imageRef, region); err != nil {
 		return failed(name, fmt.Errorf("pushing image %s: %w", imageRef, err))
 	}
 
-	// 4. Install or upgrade the controller on the current cluster.
+	// 5. Install or upgrade the controller on the cluster.
 	if err := d.cluster.Deploy(ctx, params); err != nil {
-		return failed(name, fmt.Errorf("deploying to cluster %q: %w", kubeContext, err))
+		return failed(name, fmt.Errorf("deploying to cluster %q: %w", ClusterName, err))
 	}
 
 	repoNote := "existing ECR repository"
@@ -313,27 +346,93 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		repoNote = "created ECR repository"
 	}
 	return deployed(name, fmt.Sprintf(
-		"deployed %s to cluster %q (namespace %s); %s %s",
-		imageRef, kubeContext, namespace, repoNote, repoName))
+		"deployed %s to %s (namespace %s); %s %s",
+		imageRef, describeCluster(clusterExisted), namespace, repoNote, repoName))
+}
+
+// describeCluster renders the target cluster for a human-readable outcome,
+// distinguishing a cluster this deploy created from one it found.
+func describeCluster(existed bool) string {
+	if existed {
+		return fmt.Sprintf("cluster %q", ClusterName)
+	}
+	return fmt.Sprintf("newly bootstrapped cluster %q", ClusterName)
+}
+
+// provision brings the development cluster into the state a controller needs:
+// create it when it is absent, point the local kubeconfig at it, and make sure
+// the controller's service account exists and is bound to AWS credentials
+// through an EKS Pod Identity association.
+//
+// Every step is idempotent, so this runs on every deploy and only does the work
+// the cluster is missing. The kubeconfig is repointed unconditionally: that is
+// what makes a deploy target this cluster regardless of which context was
+// selected beforehand. Creating the cluster carries the association for the
+// default service account, but the association is still checked afterwards,
+// since a caller who names a different service account needs one for it too.
+func (d *Deployer) provision(
+	ctx context.Context,
+	region, namespace, serviceAccount string,
+	opts Options,
+	exists bool,
+) error {
+	policies := opts.PolicyARNs
+	if len(policies) == 0 {
+		policies = []string{DefaultPolicyARN}
+	}
+	roleName := PodIdentityRoleName(ClusterName, namespace)
+
+	if !exists {
+		spec := ClusterSpec{
+			Name:           ClusterName,
+			Region:         region,
+			Version:        strings.TrimSpace(opts.ClusterVersion),
+			Namespace:      namespace,
+			ServiceAccount: serviceAccount,
+			RoleName:       roleName,
+			PolicyARNs:     policies,
+		}
+		if err := d.provisioner.CreateCluster(ctx, spec); err != nil {
+			return fmt.Errorf("creating cluster %q: %w", ClusterName, err)
+		}
+	}
+
+	if err := d.provisioner.UpdateKubeconfig(ctx, ClusterName, region); err != nil {
+		return fmt.Errorf("pointing kubeconfig at cluster %q: %w", ClusterName, err)
+	}
+	if err := d.provisioner.EnsureServiceAccount(ctx, namespace, serviceAccount); err != nil {
+		return fmt.Errorf("ensuring service account %s/%s: %w", namespace, serviceAccount, err)
+	}
+	if _, err := d.provisioner.EnsurePodIdentity(ctx, PodIdentitySpec{
+		Cluster:        ClusterName,
+		Region:         region,
+		Namespace:      namespace,
+		ServiceAccount: serviceAccount,
+		RoleName:       roleName,
+		PolicyARNs:     policies,
+	}); err != nil {
+		return fmt.Errorf("ensuring pod identity association for %s/%s: %w", namespace, serviceAccount, err)
+	}
+	return nil
 }
 
 // preview computes the deploy steps for a dry-run without mutating anything.
-func (d *Deployer) preview(name, kubeContext, imageRef string, p DeployParams) workspace.Result {
-	// Name the service account the controller will run under, since that decides
-	// whether it can reach AWS at all.
-	sa := fmt.Sprintf("chart-created service account %q", chartServiceAccount(p.Release))
-	if p.ServiceAccount != "" {
-		sa = fmt.Sprintf("existing service account %q", p.ServiceAccount)
+func (d *Deployer) preview(name string, clusterExists bool, imageRef string, p DeployParams) workspace.Result {
+	// Lead with the cluster creation when there is one: it is by far the most
+	// consequential thing a deploy can do, so a preview must not bury it behind
+	// the image steps.
+	var bootstrap string
+	if !clusterExists {
+		bootstrap = fmt.Sprintf(
+			"would create EKS Auto Mode cluster %q in %s with a pod identity association for %s/%s, then ",
+			ClusterName, p.Region, p.Namespace, p.ServiceAccount)
 	}
+
 	reason := fmt.Sprintf(
-		"would ensure ECR repository, build %s from local source, push it, and helm upgrade --install %s into namespace %s on cluster %q using %s",
-		imageRef, p.Release, p.Namespace, kubeContext, sa)
+		"%swould point the kubeconfig at %s, ensure ECR repository, build %s from local source, push it, and helm upgrade --install %s into namespace %s under service account %q",
+		bootstrap, describeCluster(clusterExists), imageRef, p.Release, p.Namespace, p.ServiceAccount)
 	return workspace.Result{Repo: name, Outcome: workspace.OutcomeCreated, Reason: reason}
 }
-
-// chartServiceAccount returns the service account name the controller chart
-// creates by default for the given release, which matches the release name.
-func chartServiceAccount(release string) string { return release }
 
 // execBuilder is the production Builder. It invokes the code-generator image
 // build script with the working directory set to the code-generator directory
@@ -423,19 +522,10 @@ func (execRegistry) PushImage(ctx context.Context, imageRef, region string) erro
 	return nil
 }
 
-// execCluster is the production Cluster. It shells out to kubectl and helm, both
-// of which honor the caller's current kubeconfig context.
+// execCluster is the production Cluster. It shells out to helm, which honors the
+// current kubeconfig context — repointed at the development cluster by the
+// Provisioner earlier in the same deploy.
 type execCluster struct{}
-
-// CurrentContext returns the active kubeconfig context via
-// `kubectl config current-context`.
-func (execCluster) CurrentContext(ctx context.Context) (string, error) {
-	out, err := runCombined(exec.CommandContext(ctx, "kubectl", "config", "current-context"))
-	if err != nil {
-		return "", annotate("kubectl config current-context", out, err)
-	}
-	return strings.TrimSpace(out), nil
-}
 
 // Deploy installs or upgrades the controller's Helm chart with
 // `helm upgrade --install`, overriding the image repository and tag, setting the

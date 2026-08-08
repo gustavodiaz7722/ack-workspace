@@ -25,11 +25,13 @@ automates it.
   from upstream, create a `release-<version>` branch, regenerate the release artifacts,
   commit and push them to your fork, and open a pull request against upstream.
 - **`deploy`** — build a single service controller from its local implementation branch and
-  deploy it to the cluster named by your current kubeconfig context: resolve the target
-  cluster and your AWS account, ensure an ECR repository exists (creating it when absent),
-  build the controller image from the checked-out source, push it to ECR, and
-  `helm upgrade --install` the controller with the freshly built image. Requires `docker`,
-  `aws`, `kubectl`, and `helm` on your `PATH`.
+  deploy it to the shared ACK development cluster (`ack-dev-auto`): **bootstrap that cluster
+  if it does not exist** (EKS Auto Mode plus an EKS Pod Identity association for the
+  controller), repoint your kubeconfig at it, ensure an ECR repository exists (creating it
+  when absent), build the controller image from the checked-out source, push it to ECR, and
+  `helm upgrade --install` the controller with the freshly built image. The cluster is fixed
+  and your current kubeconfig context is never used as-is, so a deploy cannot land somewhere
+  unintended. Requires `docker`, `aws`, `kubectl`, `helm`, and `eksctl` on your `PATH`.
 - **`build`** — regenerate a single service controller's code from its local checked-out
   branch by running the code-generator's `make build-controller` target. Wires up the
   environment overrides (`RUNTIME_CRD_DIR`, `ACK_GENERATE_BIN_PATH`, `TEMPLATES_DIR`) that
@@ -103,9 +105,10 @@ AWS credential chain) and a `grep` executable on your `PATH`. A `GITHUB_TOKEN`, 
 is used to raise the rate limit when listing Terraform provider docs, but is not required.
 
 ⁴ `deploy` needs `git` to tag the image with the controller's local HEAD, plus the
-`docker`, `aws`, `kubectl`, and `helm` executables on your `PATH`. It uses **AWS
-credentials** (default chain) to create/push to ECR and your current **kubeconfig context**
-to reach the cluster. No GitHub token or identity is required.
+`docker`, `aws`, `kubectl`, `helm`, and `eksctl` executables on your `PATH`. It uses **AWS
+credentials** (default chain) to create/push to ECR, to look up or create the development
+cluster, and to write your kubeconfig; those credentials must be allowed to create an EKS
+cluster and an IAM role the first time. No GitHub token or identity is required.
 
 ⁵ `build` needs `git` to read the controller's checked-out branch, plus the `make` and `go`
 toolchain (and the code-generator's own build dependencies, such as `controller-gen` and
@@ -307,10 +310,9 @@ ack-workspace build ecr --sdk-version v1.41.0  # pin the aws-sdk-go version
 ### Build and deploy a controller from local source
 
 Build a single service controller from its **local implementation branch** and deploy it
-to the cluster named by your current kubeconfig context. Use this to test in-progress
-changes on a real cluster. The controller and the `code-generator` must already be present
-in your workspace (run `init` and `add` first), and `docker`, `aws`, `kubectl`, and `helm`
-must be on your `PATH`:
+to the ACK development cluster. Use this to test in-progress changes on a real cluster. The
+controller and the `code-generator` must already be present in your workspace (run `init` and
+`add` first), and `docker`, `aws`, `kubectl`, `helm`, and `eksctl` must be on your `PATH`:
 
 ```bash
 ack-workspace deploy ecr
@@ -318,8 +320,10 @@ ack-workspace deploy ecr
 
 This will:
 
-1. resolve the target cluster from `kubectl config current-context`,
-2. resolve your AWS account and region from the active AWS credentials,
+1. resolve your AWS account and region from the active AWS credentials,
+2. bring the `ack-dev-auto` cluster into the state a controller needs — **creating it when
+   absent** — and repoint your kubeconfig at it (see
+   [the development cluster](#the-development-cluster) below),
 3. ensure an ECR repository (`ecr-controller` by default) exists in that account,
    **creating it when absent**,
 4. build the controller image from your checked-out source by running the code-generator's
@@ -335,16 +339,65 @@ image is tagged with the controller's checked-out HEAD short SHA, so each build 
 traceable to the exact local commit. Useful flags:
 
 ```bash
-ack-workspace deploy ecr --dry-run                     # preview every step; builds/pushes nothing
+ack-workspace deploy ecr --dry-run                     # preview every step; changes nothing
 ack-workspace deploy ecr --image-tag dev               # use a fixed tag instead of the HEAD SHA
 ack-workspace deploy ecr --namespace ack-test          # install into a different namespace
 ack-workspace deploy ecr --repository my-ecr-controller  # override the ECR repository name
-ack-workspace deploy ecr --region us-west-2            # push to and configure a specific region
+ack-workspace deploy ecr --region us-west-2            # target a specific region
+ack-workspace deploy ecr --service-account ack-ecr-controller  # bind credentials to another account
 ```
 
-> **Note:** `deploy` installs onto whatever cluster your current kubeconfig context points
-> at — verify it with `kubectl config current-context` before running. Prefer a local or
-> development cluster (for example a KIND cluster) over a shared one.
+#### The development cluster
+
+Every deploy targets one cluster, `ack-dev-auto`, in the region resolved from your AWS
+configuration. It is not selectable, and your current kubeconfig context is never used as-is:
+`deploy` repoints the kubeconfig at `ack-dev-auto` on every run, so a deploy cannot land on a
+cluster you did not intend. If the cluster does not exist, `deploy` creates it first — that
+makes the first run a one-time bootstrap with nothing else to prepare.
+
+When the cluster is absent, `deploy` runs `eksctl create cluster` with a generated
+configuration and then installs the controller:
+
+- **EKS Auto Mode**, with the `general-purpose` and `system` node pools. Auto Mode makes
+  compute, VPC CNI networking, EBS storage, load balancing and CoreDNS built-in cluster
+  capabilities, so there are no node groups or addons to maintain. The EKS Pod Identity
+  Agent is built in too, which is why the `eks-pod-identity-agent` addon must **not** be
+  installed on such a cluster.
+- **An EKS Pod Identity association** for `ack-system/ack-controller`, bound to an IAM role
+  named `<cluster>-<namespace>-controller`. The pod gets
+  `AWS_CONTAINER_CREDENTIALS_FULL_URI` and `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`
+  injected, which the AWS SDK picks up on its own — no static secret and no
+  `eks.amazonaws.com/role-arn` (IRSA) annotation.
+- **The shared `ack-controller` service account**, which the controller is deployed under.
+  Associations are keyed on `(namespace, serviceAccountName)` and do not support wildcards, so
+  one shared account lets a single association cover every controller you deploy to the
+  cluster. Name a different account with `--service-account` and an association is created for
+  that one instead.
+
+Every step is idempotent, so a later deploy only fills in what is missing — including adding
+an association for a service account that does not have one yet.
+
+```bash
+ack-workspace deploy ecr --dry-run              # preview, including any cluster creation
+ack-workspace deploy ecr --cluster-version 1.34 # pin the k8s version if the cluster is created
+ack-workspace deploy ecr --cluster-policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+```
+
+`--cluster-version` and `--cluster-policy-arn` only apply when the cluster (or its IAM role)
+has to be created; they are ignored once it exists.
+
+> **Caution:** creating the cluster takes 15–25 minutes and creates billable AWS resources
+> (an EKS cluster, its VPC, and an IAM role). The pod identity role gets
+> `AdministratorAccess` by default so that any ACK controller works in a throwaway
+> development account — that is appropriate there and nowhere else. Scope it down with
+> `--cluster-policy-arn` in any account you share with others.
+
+Tear the cluster down when you are finished. Delete your custom resources first so the
+controllers clean up the AWS resources they created; those are not removed with the cluster.
+
+```bash
+eksctl delete cluster --name ack-dev-auto --region us-west-2
+```
 
 ### Inspect workspace status
 
