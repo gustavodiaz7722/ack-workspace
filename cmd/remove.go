@@ -42,7 +42,7 @@ func newRemoveCommand(d deps, res *Result) *cobra.Command {
 			"Use --dry-run to preview, --keep-fork to delete only the local clone, and --yes to " +
 			"skip the confirmation prompt.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := d.prepare(cmd, prereq.Need{Git: true, Token: true, Identity: true})
+			a, err := d.prepare(cmd, prereq.Need{Tools: prereq.Git, Token: true, Identity: true})
 			if err != nil {
 				return err
 			}

@@ -449,7 +449,8 @@ func (execBuilder) Build(ctx context.Context, codegenDir, service, imageRef stri
 }
 
 // execRegistry is the production Registry. It shells out to the aws and docker
-// CLIs (whose presence is a runtime prerequisite of the deploy command).
+// CLIs, which the deploy command declares as prerequisites, so both are known to
+// be present by the time any of this runs.
 type execRegistry struct{}
 
 // Identity resolves the AWS account via `aws sts get-caller-identity` and the

@@ -30,7 +30,7 @@ func newAddCommand(d deps, res *Result) *cobra.Command {
 			"the aws-controllers-k8s organization. When 'all' is given it supersedes any other " +
 			"identifiers.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := d.prepare(cmd, prereq.Need{Git: true, Token: true, Identity: true})
+			a, err := d.prepare(cmd, prereq.Need{Tools: prereq.Git, Token: true, Identity: true})
 			if err != nil {
 				return err
 			}

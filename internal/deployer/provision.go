@@ -265,10 +265,6 @@ func (execProvisioner) ClusterExists(ctx context.Context, name, region string) (
 // success and retained on failure, with its path named in the error, so a
 // failed creation can be inspected or retried with eksctl directly.
 func (execProvisioner) CreateCluster(ctx context.Context, spec ClusterSpec) error {
-	if err := requireTool("eksctl"); err != nil {
-		return err
-	}
-
 	doc, err := renderClusterConfig(spec)
 	if err != nil {
 		return fmt.Errorf("rendering eksctl cluster configuration: %w", err)
@@ -329,9 +325,6 @@ func (execProvisioner) EnsurePodIdentity(ctx context.Context, spec PodIdentitySp
 	}
 	if exists {
 		return false, nil
-	}
-	if err := requireTool("eksctl"); err != nil {
-		return false, err
 	}
 
 	args := []string{
@@ -411,15 +404,6 @@ func ensureKubeObject(ctx context.Context, kind, name, namespace string) error {
 	out, err := runCombined(exec.CommandContext(ctx, "kubectl", create...))
 	if err != nil && !strings.Contains(out, "AlreadyExists") && !strings.Contains(out, "already exists") {
 		return annotate(fmt.Sprintf("kubectl create %s %s", kind, name), out, err)
-	}
-	return nil
-}
-
-// requireTool reports a missing executable as an actionable error before any
-// work depending on it is attempted.
-func requireTool(name string) error {
-	if _, err := exec.LookPath(name); err != nil {
-		return fmt.Errorf("no %q executable was found on your PATH; install %s and ensure it is on your PATH", name, name)
 	}
 	return nil
 }

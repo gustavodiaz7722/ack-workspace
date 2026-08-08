@@ -79,45 +79,58 @@ go install github.com/aws-controllers-k8s/ack-workspace@latest
 
 ## Prerequisites
 
-Each command checks its prerequisites up front and fails fast with a clear message if
-anything is missing:
+Every command declares what it needs and it is all verified **before any work starts**. If
+several things are missing you get one error naming all of them, rather than discovering them
+one run at a time:
 
-| Command  | `git` | GitHub token | GitHub identity |
-|----------|:-----:|:------------:|:---------------:|
-| `init`   |  yes  |     yes      |       yes       |
-| `add`    |  yes  |     yes      |       yes       |
-| `remove` |  yes  |     yes      |       yes       |
-| `release`|  yes  |     yes¹     |       yes       |
-| `deploy` |  yes  |      no⁴     |       no        |
-| `build`  |  yes  |      no⁵     |       no        |
-| `refresh`|  yes  |     yes²     |       yes       |
-| `status` |  yes  |      no      |       no        |
-| `candidates` | no³ |    no      |       no        |
-| `attribution` | yes |   no⁶     |       no        |
-| `config` |  no   |      no      |       no        |
+```
+missing 4 prerequisites:
+  - aws: no `aws` executable was found on your PATH; install it and ensure it is on your PATH
+  - kubectl: no `kubectl` executable was found on your PATH; install it and ensure it is on your PATH
+  - helm: no `helm` executable was found on your PATH; install it and ensure it is on your PATH
+  - eksctl: no `eksctl` executable was found on your PATH; install it and ensure it is on your PATH
+```
 
-¹ `release` needs a token to open the upstream pull request and your identity to name the
+| Command | Executables on `PATH` | GitHub token | GitHub identity |
+|---------|-----------------------|:------------:|:---------------:|
+| `init`   | `git` | yes | yes |
+| `add`    | `git` | yes | yes |
+| `remove` | `git` | yes | yes |
+| `refresh`| `git` | yes¹ | yes |
+| `release`| `git`² | yes³ | yes |
+| `build`  | `git`, `make`, `go`⁴ | no | no |
+| `deploy` | `git`, `docker`, `aws`, `kubectl`, `helm`, `eksctl`⁵ | no | no |
+| `status` | `git` | no | no |
+| `attribution` | `git`⁶ | no | no |
+| `candidates` | — ⁷ | no | no |
+| `config` | — | no | no |
+
+¹ `refresh` needs a token and identity to sync your fork from upstream via the GitHub API.
+
+² `release` also runs the code-generator's release script, which needs the code-generator's
+own build dependencies (`go`, `make`, `controller-gen`, `helm`). Those are not pre-flighted,
+because the script — not this tool — decides which of them it uses.
+
+³ `release` needs a token to open the upstream pull request and your identity to name the
 fork branch; pass `--skip-pr` to push the release branch without opening a PR.
 
-² `refresh` needs a token and identity to sync your fork from upstream via the GitHub API.
+⁴ `go` is checked alongside `make` because the `make` target invokes it, and a missing `go`
+would otherwise surface as a confusing failure from inside `make`.
 
-³ `candidates` reads local repositories and needs network access to the public AWS API
-models; it uses no AWS credentials. A `GITHUB_TOKEN`, if present, only raises the rate limit
-on those fetches and is not required.
+⁵ `eksctl` is required even though `deploy` only uses it when the development cluster has to
+be created: learning you cannot create one is worth knowing before a 20-minute image build,
+not after.
 
-⁴ `deploy` needs `git` to tag the image with the controller's local HEAD, plus the
-`docker`, `aws`, `kubectl`, `helm`, and `eksctl` executables on your `PATH`. It uses **AWS
-credentials** (default chain) to create/push to ECR, to look up or create the development
-cluster, and to write your kubeconfig; those credentials must be allowed to create an EKS
-cluster and an IAM role the first time. No GitHub token or identity is required.
+⁶ `attribution` runs the generation on CodeBuild through the AWS SDK, so it needs no AWS CLI.
 
-⁵ `build` needs `git` to read the controller's checked-out branch, plus the `make` and `go`
-toolchain (and the code-generator's own build dependencies, such as `controller-gen` and
-`helm`) on your `PATH`. No GitHub token or identity is required.
+⁷ `candidates` shells out to nothing. It reads local repositories and fetches the public AWS
+API models over HTTPS.
 
-⁶ `attribution` needs `git` to read the controller's checked-out branch and **AWS
-credentials** (default chain) allowed to run CodeBuild and read and write the artifact
-bucket. No GitHub token or identity is required.
+**AWS credentials are not pre-flighted.** `deploy` and `attribution` resolve them from the
+default chain when they run, so an expired session surfaces as a failure at that point rather
+than up front. The same goes for anything else that needs a network round-trip to answer:
+whether a token's scopes suffice, whether a cluster is reachable. Keeping the prerequisite
+check hermetic is what lets it run on every invocation for free.
 
 Provide a GitHub token via the `--token` flag or the `GITHUB_TOKEN` environment variable.
 The token is **never** written to the config file.

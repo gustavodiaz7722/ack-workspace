@@ -14,6 +14,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/attributor"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/builder"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/config"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
@@ -74,6 +75,10 @@ type recorder struct {
 	attributionOpts   attributor.Options
 	attributionRegion string
 
+	deployCalled  bool
+	deployService string
+	deployOpts    deployer.Options
+
 	candidatesCalled bool
 	candidatesOpts   scanner.CandidatesOptions
 
@@ -108,6 +113,12 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 		candidatesRun: func(ctx context.Context, a app.App, opts scanner.CandidatesOptions, out, errOut io.Writer) (workspace.Summary, error) {
 			rec.candidatesCalled = true
 			rec.candidatesOpts = opts
+			return rec.summary, rec.runErr
+		},
+		deployRun: func(ctx context.Context, a app.App, service string, opts deployer.Options) (workspace.Summary, error) {
+			rec.deployCalled = true
+			rec.deployService = service
+			rec.deployOpts = opts
 			return rec.summary, rec.runErr
 		},
 		removeRun: func(ctx context.Context, a app.App, identifiers []string, opts remover.Options) (workspace.Summary, error) {
@@ -178,22 +189,22 @@ func TestPrerequisiteNeedPerCommand(t *testing.T) {
 		{
 			name: "init needs git+token+identity",
 			args: []string{"init", "--" + config.FlagGitHubUser, "octocat", "--" + config.FlagToken, "tok"},
-			want: prereq.Need{Git: true, Token: true, Identity: true},
+			want: prereq.Need{Tools: prereq.Git, Token: true, Identity: true},
 		},
 		{
 			name: "add needs git+token+identity",
 			args: []string{"add", "s3", "--" + config.FlagGitHubUser, "octocat", "--" + config.FlagToken, "tok"},
-			want: prereq.Need{Git: true, Token: true, Identity: true},
+			want: prereq.Need{Tools: prereq.Git, Token: true, Identity: true},
 		},
 		{
 			name: "refresh needs git+token+identity",
 			args: []string{"refresh", "--yes", "--" + config.FlagGitHubUser, "octocat", "--" + config.FlagToken, "tok"},
-			want: prereq.Need{Git: true, Token: true, Identity: true},
+			want: prereq.Need{Tools: prereq.Git, Token: true, Identity: true},
 		},
 		{
 			name: "status needs git only",
 			args: []string{"status", "--" + config.FlagGitHubUser, "octocat"},
-			want: prereq.Need{Git: true},
+			want: prereq.Need{Tools: prereq.Git},
 		},
 		{
 			// attribution reads the checked-out branch and lists remote refs, so it
@@ -201,7 +212,26 @@ func TestPrerequisiteNeedPerCommand(t *testing.T) {
 			// need for a fork owner, and declaring it would block those paths.
 			name: "attribution needs git only",
 			args: []string{"attribution", "ecr", "--" + config.FlagGitHubUser, "octocat"},
-			want: prereq.Need{Git: true},
+			want: prereq.Need{Tools: prereq.Git},
+		},
+		{
+			// deploy drives the whole container/Kubernetes toolchain, and every part
+			// of it is verified up front — including eksctl, which it only reaches
+			// when the cluster has to be created. Learning that after a 20-minute
+			// image build is the failure mode this declaration exists to prevent.
+			name: "deploy needs the full container and cluster toolchain",
+			args: []string{"deploy", "ecr", "--" + config.FlagGitHubUser, "octocat"},
+			want: prereq.Need{Tools: prereq.Git | prereq.Docker | prereq.AWS |
+				prereq.Kubectl | prereq.Helm | prereq.Eksctl},
+		},
+		{
+			// candidates reads local files and fetches models over HTTP; it shells out
+			// to nothing, so it must declare nothing. (The identity flag here only
+			// satisfies configuration resolution, which requires one for every
+			// command; candidates itself declares no identity need.)
+			name: "candidates needs no tools at all",
+			args: []string{"candidates", "ecr", "--" + config.FlagGitHubUser, "octocat"},
+			want: prereq.Need{},
 		},
 	}
 
@@ -527,7 +557,7 @@ func TestRemove_NeedsGitTokenIdentity(t *testing.T) {
 	if !chk.called {
 		t.Fatal("prerequisite checker was not called")
 	}
-	want := prereq.Need{Git: true, Token: true, Identity: true}
+	want := prereq.Need{Tools: prereq.Git, Token: true, Identity: true}
 	if chk.gotNeed != want {
 		t.Errorf("Need = %+v, want %+v", chk.gotNeed, want)
 	}
@@ -615,7 +645,7 @@ func TestRelease_NeedsGitTokenIdentity(t *testing.T) {
 	if !chk.called {
 		t.Fatal("prerequisite checker was not called")
 	}
-	want := prereq.Need{Git: true, Token: true, Identity: true}
+	want := prereq.Need{Tools: prereq.Git, Token: true, Identity: true}
 	if chk.gotNeed != want {
 		t.Errorf("Need = %+v, want %+v", chk.gotNeed, want)
 	}
@@ -684,7 +714,9 @@ func TestBuild_NeedsGitOnly(t *testing.T) {
 	if !chk.called {
 		t.Fatal("prerequisite checker was not called")
 	}
-	want := prereq.Need{Git: true}
+	// build shells out to make, whose target runs go, so both belong in the
+	// pre-flight rather than surfacing from inside a failed make.
+	want := prereq.Need{Tools: prereq.Git | prereq.Make | prereq.Go}
 	if chk.gotNeed != want {
 		t.Errorf("Need = %+v, want %+v", chk.gotNeed, want)
 	}

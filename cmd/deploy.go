@@ -44,11 +44,10 @@ const (
 // context is never used as-is, so a deploy cannot land on an unintended
 // cluster.
 //
-// deploy reads the controller's checked-out HEAD to tag the image, so it
-// declares the git prerequisite. It does not fork, clone, push to GitHub, or
-// open a pull request, so it needs no GitHub token or identity. The docker,
-// aws, kubectl, and helm executables must be available at runtime; a missing
-// tool is reported as a failed Result. The empty-service case is enforced by
+// deploy declares the whole toolchain it drives — git, docker, aws, kubectl,
+// helm and eksctl — so a missing one is a pre-flight error naming every absent
+// tool at once. It does not fork, clone, push to GitHub, or open a pull request,
+// so it needs no GitHub token or identity. The empty-service case is enforced by
 // the deployer, which returns a *deployer.UsageError so the rule lives in one
 // place and maps to a usage exit code.
 func newDeployCommand(d deps, res *Result) *cobra.Command {
@@ -76,7 +75,8 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			"gives controllers in the target namespace AWS credentials. That first run is a one-time " +
 			"bootstrap which takes 15-25 minutes and creates billable AWS resources (an EKS cluster, " +
 			"its VPC, and an IAM role); later deploys reuse it and only fill in what is missing. " +
-			"eksctl must be on your PATH for the bootstrap. The association attaches " +
+			"deploy checks for docker, aws, kubectl, helm and eksctl before it starts, so a " +
+			"missing one is reported up front rather than partway through. The association attaches " +
 			"AdministratorAccess by default, which suits a throwaway development account and nothing " +
 			"else -- scope it down with --cluster-policy-arn anywhere else. Pin the Kubernetes " +
 			"version with --cluster-version; by default eksctl chooses it.\n\n" +
@@ -90,7 +90,8 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			"kubeconfig, building, pushing, or modifying anything.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := d.prepare(cmd, prereq.Need{Git: true})
+			a, err := d.prepare(cmd, prereq.Need{Tools: prereq.Git | prereq.Docker | prereq.AWS |
+				prereq.Kubectl | prereq.Helm | prereq.Eksctl})
 			if err != nil {
 				return err
 			}

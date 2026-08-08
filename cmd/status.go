@@ -26,7 +26,7 @@ func newStatusCommand(d deps, res *Result) *cobra.Command {
 			"upstream (up to date, ahead, behind, or unavailable).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := d.prepare(cmd, prereq.Need{Git: true})
+			a, err := d.prepare(cmd, prereq.Need{Tools: prereq.Git})
 			if err != nil {
 				return err
 			}

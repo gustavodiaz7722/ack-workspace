@@ -78,7 +78,7 @@ func newAttributionCommand(d deps, res *Result) *cobra.Command {
 			"without creating any resource or starting any build.",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := d.prepare(cmd, prereq.Need{Git: true})
+			a, err := d.prepare(cmd, prereq.Need{Tools: prereq.Git})
 			if err != nil {
 				return err
 			}

@@ -23,7 +23,7 @@ func newInitCommand(d deps, res *Result) *cobra.Command {
 			"clones them into the workspace root, and configures the origin and upstream remotes.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := d.prepare(cmd, prereq.Need{Git: true, Token: true, Identity: true})
+			a, err := d.prepare(cmd, prereq.Need{Tools: prereq.Git, Token: true, Identity: true})
 			if err != nil {
 				return err
 			}

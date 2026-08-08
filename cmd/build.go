@@ -18,11 +18,10 @@ const flagSDKVersion = "sdk-version"
 // code-generator directory with the environment overrides the build scripts
 // need when the workspace root is not literally ".../aws-controllers-k8s".
 //
-// build reads the controller's checked-out branch, so it declares the git
-// prerequisite. It does not fork, clone, push to GitHub, or open a pull
-// request, so it needs no GitHub token or identity. The make and go toolchain
-// must be available at runtime; a build failure is reported as a failed Result.
-// The empty-service case is enforced by the builder, which returns a
+// build declares git, make and go as prerequisites, so a missing one is reported
+// before the build starts rather than from inside make. It does not fork, clone,
+// push to GitHub, or open a pull request, so it needs no GitHub token or
+// identity. The empty-service case is enforced by the builder, which returns a
 // *builder.UsageError so the rule lives in one place and maps to a usage exit
 // code.
 func newBuildCommand(d deps, res *Result) *cobra.Command {
@@ -46,7 +45,7 @@ func newBuildCommand(d deps, res *Result) *cobra.Command {
 			"executing it.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := d.prepare(cmd, prereq.Need{Git: true})
+			a, err := d.prepare(cmd, prereq.Need{Tools: prereq.Git | prereq.Make | prereq.Go})
 			if err != nil {
 				return err
 			}
