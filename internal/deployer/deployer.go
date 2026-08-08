@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/aws-controllers-k8s/ack-workspace/internal/app"
@@ -53,9 +54,12 @@ const (
 	// the AWS_SERVICE_DOCKER_IMG environment variable for the output image
 	// reference.
 	imageBuildScript = "./scripts/build-controller-image.sh"
-	// defaultNamespace is the Kubernetes namespace ACK controllers are installed
-	// into when the caller does not override it.
-	defaultNamespace = "ack-system"
+	// Namespace is the Kubernetes namespace ACK controllers are installed into. It
+	// is fixed rather than selectable: the development cluster binds AWS
+	// credentials through a pod identity association keyed on a single (namespace,
+	// service account) pair, so a controller installed anywhere else would start
+	// without credentials. Every controller shares this namespace.
+	Namespace = "ack-system"
 	// releasePrefix is prepended to the controller name to form the Helm release
 	// name (for example "ack-ecr-controller").
 	releasePrefix = "ack-"
@@ -88,6 +92,11 @@ type Registry interface {
 	// EnsureRepository ensures an ECR repository named repo exists in region,
 	// creating it when absent. It reports whether it created the repository.
 	EnsureRepository(ctx context.Context, repo, region string) (created bool, err error)
+	// ImageExists reports whether repo already holds an image tagged tag in
+	// region. Both results must be definitive: an implementation that cannot tell
+	// returns an error, and the deploy fails rather than guessing whether to
+	// build.
+	ImageExists(ctx context.Context, repo, tag, region string) (bool, error)
 	// PushImage authenticates the local docker client to the ECR registry and
 	// pushes imageRef.
 	PushImage(ctx context.Context, imageRef, region string) error
@@ -104,16 +113,6 @@ type Cluster interface {
 // Options controls deploy behavior. All fields are optional; each falls back to
 // a sensible default described on the field.
 type Options struct {
-	// Namespace is the Kubernetes namespace the controller is installed into. It
-	// defaults to "ack-system" when empty.
-	Namespace string
-	// ImageTag is the tag applied to the built image. It defaults to the
-	// abbreviated SHA of the controller's checked-out HEAD when empty, so each
-	// build is traceable to the exact local commit.
-	ImageTag string
-	// Repository overrides the ECR repository name. It defaults to the controller
-	// repository name ("<service>-controller") when empty.
-	Repository string
 	// Region overrides the AWS region the image is pushed to and the controller is
 	// configured for. It defaults to the region resolved from the active AWS
 	// configuration when empty.
@@ -127,22 +126,23 @@ type Options struct {
 	// throwaway development account and nothing else. Like ClusterVersion, they
 	// only apply when the role has to be created.
 	PolicyARNs []string
-	// ServiceAccount names an existing Kubernetes service account for the
-	// controller to run under, instead of the one the chart creates by default
-	// ("ack-<service>-controller").
+	// ResyncPeriod is the controller's default resync period in seconds, set on
+	// the chart as reconcile.defaultResyncPeriod. Zero leaves the chart's own
+	// default in place (36000, ten hours); a negative value is a usage error.
 	//
-	// This matters because the chart's own service account carries no AWS
-	// credential binding: it has no eks.amazonaws.com/role-arn annotation, and an
-	// EKS Pod Identity association is attached to a specific service account name.
-	// On a cluster that grants the controller credentials through either
-	// mechanism, a chart-created service account leaves the controller with no way
-	// to reach AWS and it exits at startup with "unable to determine account info:
-	// ... NoCredentialProviders".
+	// The chart default is deliberately long, which makes any bug that only
+	// manifests across reconciles — a reference whose resolved value does not
+	// match what the Describe response returns, or a server-side default that is
+	// never captured into the spec — effectively unobservable in a test session.
+	// Both show up as a delta that reappears on every resync, so confirming their
+	// absence means watching several resyncs. Setting this to a small value (60)
+	// turns a ten-hour wait into minutes.
 	//
-	// It defaults to SharedServiceAccount, the account the development cluster's
-	// pod identity association is attached to. Naming a different one makes the
-	// deploy create an association for that account instead.
-	ServiceAccount string
+	// It belongs on the deploy rather than a follow-up `helm upgrade` because
+	// deploy installs the chart with its default values: an override applied
+	// beforehand is discarded, and one applied afterwards costs a second rollout
+	// and is easy to forget.
+	ResyncPeriod int
 }
 
 // DeployParams describes one `helm upgrade --install` of a controller chart. It
@@ -161,9 +161,9 @@ type DeployParams struct {
 	ImageTag string
 	// Region is the AWS region the controller is configured for.
 	Region string
-	// ServiceAccount, when non-empty, makes the deploy reuse an existing service
-	// account of that name rather than letting the chart create its own.
-	ServiceAccount string
+	// ResyncPeriod, when positive, overrides the chart's
+	// reconcile.defaultResyncPeriod (in seconds). Zero leaves the chart default.
+	ResyncPeriod int
 }
 
 // Deployer builds a controller and deploys it to the development cluster.
@@ -207,6 +207,13 @@ func (d *Deployer) Deploy(ctx context.Context, ap app.App, service string, opts 
 	if alias == "" {
 		return workspace.Summary{}, &UsageError{Msg: "a service identifier is required (for example: ecr or ecr-controller)"}
 	}
+	// Validated here rather than at the flag so the rule maps to a usage exit code
+	// from every call site, matching the empty-service check above.
+	if opts.ResyncPeriod < 0 {
+		return workspace.Summary{}, &UsageError{
+			Msg: fmt.Sprintf("resync period must be a positive number of seconds, got %d", opts.ResyncPeriod),
+		}
+	}
 
 	result := d.process(ctx, ap, alias, opts)
 	return workspace.Summary{Results: []workspace.Result{result}}, nil
@@ -237,16 +244,31 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		return failed(name, fmt.Errorf("Helm chart not found at %s", chartPath))
 	}
 
-	// Resolve the image tag from the local implementation commit unless the caller
-	// pinned one, so a build is traceable to the exact checked-out state.
-	tag := strings.TrimSpace(opts.ImageTag)
-	if tag == "" {
-		repo := git.NewRepo(controllerPath, ap.Git)
-		sha, err := repo.HeadSHA(ctx)
-		if err != nil {
-			return failed(name, fmt.Errorf("determining image tag: %w", err))
-		}
-		tag = sha
+	// The image tag is always the checked-out HEAD SHA, and the working tree must
+	// be clean for that to be true of the source as well. Together these make the
+	// tag a complete description of what is in the image, which is what lets a
+	// deploy reuse an image already in ECR without inspecting it: the tag being
+	// present proves an image built from exactly this source exists.
+	//
+	// A dirty tree breaks that identity — the SHA names the commit, not the edits
+	// on top of it — so it is refused rather than papered over with a rebuild flag.
+	// Refusing keeps every deploy reproducible from a commit id, and makes the
+	// alternative (silently validating an image that predates your changes)
+	// unreachable.
+	repo := git.NewRepo(controllerPath, ap.Git)
+	dirty, err := repo.IsDirty(ctx)
+	if err != nil {
+		return failed(name, fmt.Errorf("checking working tree of %s: %w", controllerPath, err))
+	}
+	if dirty {
+		return failed(name, fmt.Errorf(
+			"%s has uncommitted changes; commit them so the deployed image tag identifies the source it was built from",
+			name))
+	}
+
+	tag, err := repo.HeadSHA(ctx)
+	if err != nil {
+		return failed(name, fmt.Errorf("determining image tag: %w", err))
 	}
 
 	// Resolve the AWS account and region the image is pushed to. This comes first
@@ -263,36 +285,27 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		return failed(name, fmt.Errorf("could not resolve AWS account (%q) and region (%q); configure your AWS credentials and region", account, region))
 	}
 
-	repoName := strings.TrimSpace(opts.Repository)
-	if repoName == "" {
-		repoName = name
-	}
-	namespace := strings.TrimSpace(opts.Namespace)
-	if namespace == "" {
-		namespace = defaultNamespace
-	}
+	// The ECR repository, namespace, and Helm release are all derived from the
+	// controller name, so a given controller always occupies the same place. Making
+	// any of them selectable would let two deploys of one controller disagree about
+	// where it lives — a second repository holding a divergent image history, or an
+	// install in a namespace the cluster binds no credentials to.
+	repoName := name
+	namespace := Namespace
 	release := releasePrefix + name
 
 	registryHost := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", account, region)
 	imageRepo := registryHost + "/" + repoName
 	imageRef := imageRepo + ":" + tag
 
-	// The cluster binds AWS credentials to one specific service account through
-	// its pod identity association, so default to that account rather than letting
-	// the chart create its own, which would carry no credentials.
-	serviceAccount := strings.TrimSpace(opts.ServiceAccount)
-	if serviceAccount == "" {
-		serviceAccount = SharedServiceAccount
-	}
-
 	params := DeployParams{
-		ChartDir:       chartPath,
-		Namespace:      namespace,
-		Release:        release,
-		ImageRepo:      imageRepo,
-		ImageTag:       tag,
-		Region:         region,
-		ServiceAccount: serviceAccount,
+		ChartDir:     chartPath,
+		Namespace:    namespace,
+		Release:      release,
+		ImageRepo:    imageRepo,
+		ImageTag:     tag,
+		Region:       region,
+		ResyncPeriod: opts.ResyncPeriod,
 	}
 
 	// Look up the development cluster. An inconclusive answer is a failure rather
@@ -303,15 +316,33 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		return failed(name, fmt.Errorf("checking whether cluster %q exists in %s: %w", ClusterName, region, err))
 	}
 
+	// Decide whether ECR already holds this tag, before the dry-run branch so a
+	// preview reports the same build-or-reuse decision the real run will make. The
+	// tag is the HEAD SHA of a clean tree, so its presence means an image built
+	// from exactly this source already exists and redeploying the same commit —
+	// after a failed helm step, or to change a chart value like the resync period
+	// — costs a rollout instead of a build. The lookup is read-only, which is why
+	// it also runs under --dry-run.
+	//
+	// An inconclusive lookup is a failure, not a guess in either direction. The
+	// whole point of a tag that identifies its source is that build-or-reuse is
+	// decided by fact; answering it by assumption when the registry cannot be
+	// reached would reintroduce exactly the ambiguity this design removes, and it
+	// would do so silently.
+	reused, err := d.registry.ImageExists(ctx, repoName, tag, region)
+	if err != nil {
+		return failed(name, fmt.Errorf("checking whether %s already exists in ECR: %w", imageRef, err))
+	}
+
 	// Dry-run: report the steps that would be taken without mutating anything.
 	if ap.DryRun {
-		return d.preview(name, clusterExisted, imageRef, params)
+		return d.preview(name, clusterExisted, imageRef, reused, params)
 	}
 
 	// 1. Bring the cluster into the state a controller needs: create it when
 	// absent, repoint the kubeconfig at it, and make sure the controller's service
 	// account exists and is bound to AWS credentials.
-	if err := d.provision(ctx, region, namespace, serviceAccount, opts, clusterExisted); err != nil {
+	if err := d.provision(ctx, region, opts, clusterExisted); err != nil {
 		return failed(name, err)
 	}
 
@@ -322,17 +353,20 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		return failed(name, fmt.Errorf("ensuring ECR repository %q: %w", repoName, err))
 	}
 
-	// 3. Build the controller image from the local implementation source.
-	if err := d.builder.Build(ctx, codegenPath, alias, imageRef); err != nil {
-		return failed(name, fmt.Errorf("building controller image: %w", err))
+	// 3. Build and push, unless the tag was already in ECR (decided above).
+	if !reused {
+		// 3a. Build the controller image from the local implementation source.
+		if err := d.builder.Build(ctx, codegenPath, alias, imageRef); err != nil {
+			return failed(name, fmt.Errorf("building controller image: %w", err))
+		}
+
+		// 3b. Push the image to ECR.
+		if err := d.registry.PushImage(ctx, imageRef, region); err != nil {
+			return failed(name, fmt.Errorf("pushing image %s: %w", imageRef, err))
+		}
 	}
 
-	// 4. Push the image to ECR.
-	if err := d.registry.PushImage(ctx, imageRef, region); err != nil {
-		return failed(name, fmt.Errorf("pushing image %s: %w", imageRef, err))
-	}
-
-	// 5. Install or upgrade the controller on the cluster.
+	// 4. Install or upgrade the controller on the cluster.
 	if err := d.cluster.Deploy(ctx, params); err != nil {
 		return failed(name, fmt.Errorf("deploying to cluster %q: %w", ClusterName, err))
 	}
@@ -341,9 +375,15 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 	if created {
 		repoNote = "created ECR repository"
 	}
+	// Say when the image was reused rather than built, so a deploy that finished
+	// in seconds is explained and it is clear which artifact is running.
+	imageNote := "deployed"
+	if reused {
+		imageNote = "deployed existing"
+	}
 	return deployed(name, fmt.Sprintf(
-		"deployed %s to %s (namespace %s); %s %s",
-		imageRef, describeCluster(clusterExisted), namespace, repoNote, repoName))
+		"%s %s to %s (namespace %s); %s %s",
+		imageNote, imageRef, describeCluster(clusterExisted), namespace, repoNote, repoName))
 }
 
 // describeCluster renders the target cluster for a human-readable outcome,
@@ -364,12 +404,18 @@ func describeCluster(existed bool) string {
 // deploy against a cluster that usually already exists, and does only the work
 // that is actually missing. The kubeconfig is repointed unconditionally, which is
 // what makes a deploy target this cluster regardless of which context was
-// selected beforehand. Creating the cluster carries the association for the
-// default service account, but the association is still checked afterwards, since
-// a caller who names a different service account needs one for it too.
+// selected beforehand. Creating the cluster carries the association, and it is
+// still checked afterwards so that a cluster created before this code existed, or
+// one whose association was removed, is repaired by the next deploy.
+//
+// The namespace and service account are the package constants rather than
+// parameters, because they are the same values the chart is installed with. Both
+// halves of the pod identity association key have to agree with the install for
+// the controller to receive credentials at all, and taking them from one source
+// makes disagreement unrepresentable.
 func (d *Deployer) provision(
 	ctx context.Context,
-	region, namespace, serviceAccount string,
+	region string,
 	opts Options,
 	exists bool,
 ) error {
@@ -377,6 +423,8 @@ func (d *Deployer) provision(
 	if len(policies) == 0 {
 		policies = []string{DefaultPolicyARN}
 	}
+	namespace := Namespace
+	serviceAccount := SharedServiceAccount
 	roleName := PodIdentityRoleName(ClusterName, namespace)
 
 	if !exists {
@@ -414,7 +462,7 @@ func (d *Deployer) provision(
 }
 
 // preview computes the deploy steps for a dry-run without mutating anything.
-func (d *Deployer) preview(name string, clusterExists bool, imageRef string, p DeployParams) workspace.Result {
+func (d *Deployer) preview(name string, clusterExists bool, imageRef string, reused bool, p DeployParams) workspace.Result {
 	// Lead with the cluster creation when there is one: it is by far the most
 	// consequential thing a deploy can do, so a preview must not bury it behind
 	// the image steps.
@@ -422,12 +470,27 @@ func (d *Deployer) preview(name string, clusterExists bool, imageRef string, p D
 	if !clusterExists {
 		bootstrap = fmt.Sprintf(
 			"would create EKS Auto Mode cluster %q in %s with a pod identity association for %s/%s, then ",
-			ClusterName, p.Region, p.Namespace, p.ServiceAccount)
+			ClusterName, p.Region, p.Namespace, SharedServiceAccount)
+	}
+
+	// Surface the resync override in the preview: it changes how the deployed
+	// controller behaves, so a dry-run that omitted it would not reflect the run.
+	var resync string
+	if p.ResyncPeriod > 0 {
+		resync = fmt.Sprintf(" with a %ds default resync period", p.ResyncPeriod)
+	}
+
+	// Report build-or-reuse, because it is the difference between a deploy that
+	// takes minutes and one that takes seconds, and it says which artifact would
+	// actually run.
+	image := fmt.Sprintf("build %s from local source, push it", imageRef)
+	if reused {
+		image = fmt.Sprintf("reuse the existing image %s (already in ECR, no build or push)", imageRef)
 	}
 
 	reason := fmt.Sprintf(
-		"%swould point the kubeconfig at %s, ensure ECR repository, build %s from local source, push it, and helm upgrade --install %s into namespace %s under service account %q",
-		bootstrap, describeCluster(clusterExists), imageRef, p.Release, p.Namespace, p.ServiceAccount)
+		"%swould point the kubeconfig at %s, ensure ECR repository, %s, and helm upgrade --install %s into namespace %s under service account %q%s",
+		bootstrap, describeCluster(clusterExists), image, p.Release, p.Namespace, SharedServiceAccount, resync)
 	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
 
@@ -491,6 +554,47 @@ func (execRegistry) EnsureRepository(ctx context.Context, repo, region string) (
 	return true, nil
 }
 
+// ImageExists reports whether the repository already holds an image with the
+// given tag, via `aws ecr describe-images --image-ids imageTag=<tag>`.
+//
+// Unlike EnsureRepository, a command failure is *not* collapsed into "absent":
+// describe-images fails both for a genuinely missing tag (ImageNotFound) and for
+// a missing repository, expired credentials, or a network problem, and the
+// caller must not skip a build because a lookup broke. Only the recognized
+// not-found signal returns (false, nil); anything else returns an error for the
+// caller to treat as unknown.
+func (execRegistry) ImageExists(ctx context.Context, repo, tag, region string) (bool, error) {
+	describe := exec.CommandContext(ctx, "aws", "ecr", "describe-images",
+		"--repository-name", repo, "--image-ids", "imageTag="+tag, "--region", region)
+	out, err := runCombined(describe)
+	if err == nil {
+		return true, nil
+	}
+	found, classifyErr := classifyImageLookup(out, err)
+	if classifyErr != nil {
+		return false, annotate(fmt.Sprintf("aws ecr describe-images --repository-name %s --image-ids imageTag=%s", repo, tag), out, err)
+	}
+	return found, nil
+}
+
+// classifyImageLookup interprets a failed `aws ecr describe-images` invocation:
+// it returns (false, nil) when the output carries a definitive not-found signal,
+// and (false, err) when the failure is inconclusive.
+//
+// The two cases must not be conflated. ImageNotFoundException is the tag being
+// absent from a repository that exists. RepositoryNotFoundException is equally
+// definitive, because a repository that does not exist cannot hold the tag — the
+// deploy creates it moments later, empty. Everything else (expired credentials,
+// no network, a denied permission) says nothing about whether the tag is there,
+// and the caller aborts on it: a deploy decides build-or-reuse from the registry
+// or not at all.
+func classifyImageLookup(out string, err error) (bool, error) {
+	if strings.Contains(out, "ImageNotFoundException") || strings.Contains(out, "RepositoryNotFoundException") {
+		return false, nil
+	}
+	return false, err
+}
+
 // PushImage authenticates docker to the ECR registry using an authorization
 // token from `aws ecr get-login-password` piped into `docker login`, then runs
 // `docker push`. The registry host is the portion of imageRef before the first
@@ -547,11 +651,19 @@ func (execCluster) Deploy(ctx context.Context, p DeployParams) error {
 // and rejected by the chart's values schema, which requires image.tag to be a
 // string.
 //
-// When p.ServiceAccount is set, the chart is told not to create a service
-// account and to reference the named one instead. The name goes through
-// `--set-string` for the same coercion reason as the tag: an all-digit name is
-// a valid Kubernetes object name but Helm would otherwise turn it into a
-// number.
+// The chart is always told not to create a service account and to use
+// SharedServiceAccount instead, because the chart's own account carries no AWS
+// credential binding: it has no eks.amazonaws.com/role-arn annotation, and an
+// EKS Pod Identity association is attached to one specific service account name.
+// A controller running under a chart-created account has no way to reach AWS and
+// exits at startup with "unable to determine account info: ...
+// NoCredentialProviders". The name goes through `--set-string` for the same
+// coercion reason as the tag.
+//
+// A positive p.ResyncPeriod overrides reconcile.defaultResyncPeriod. It goes
+// through plain `--set` precisely because the chart's values schema types it as
+// a number, the opposite of the tag: `--set-string` would make it a string and
+// the schema would reject it.
 func helmUpgradeArgs(p DeployParams) []string {
 	args := []string{
 		"upgrade", "--install", p.Release, p.ChartDir,
@@ -560,11 +672,15 @@ func helmUpgradeArgs(p DeployParams) []string {
 		"--set", "image.repository=" + p.ImageRepo,
 		"--set-string", "image.tag=" + p.ImageTag,
 		"--set", "aws.region=" + p.Region,
+		"--set", "serviceAccount.create=false",
+		"--set-string", "serviceAccount.name=" + SharedServiceAccount,
 	}
-	if p.ServiceAccount != "" {
+	// Only override when asked. Passing 0 would not mean "chart default": the
+	// chart guards the controller flag with `gt (int .Values...) 0`, so an
+	// explicit 0 disables periodic resync altogether.
+	if p.ResyncPeriod > 0 {
 		args = append(args,
-			"--set", "serviceAccount.create=false",
-			"--set-string", "serviceAccount.name="+p.ServiceAccount,
+			"--set", "reconcile.defaultResyncPeriod="+strconv.Itoa(p.ResyncPeriod),
 		)
 	}
 	return args

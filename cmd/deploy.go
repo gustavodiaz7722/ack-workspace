@@ -10,24 +10,16 @@ import (
 )
 
 const (
-	// flagNamespace overrides the Kubernetes namespace the controller is installed
-	// into (default "ack-system").
-	flagNamespace = "namespace"
-	// flagImageTag overrides the tag applied to the built image (default the
-	// controller's checked-out HEAD short SHA).
-	flagImageTag = "image-tag"
-	// flagRepository overrides the ECR repository name (default
-	// "<service>-controller").
-	flagRepository = "repository"
-	// flagServiceAccount names an existing service account for the controller to
-	// run under, instead of the one the chart creates.
-	flagServiceAccount = "service-account"
 	// flagClusterVersion pins the Kubernetes version of the development cluster
 	// when deploy has to create it.
 	flagClusterVersion = "cluster-version"
 	// flagClusterPolicyARN sets the IAM policies attached to the cluster's pod
 	// identity role.
 	flagClusterPolicyARN = "cluster-policy-arn"
+	// flagResyncPeriod overrides the controller's default resync period, in
+	// seconds, so reconcile-dependent behavior can be observed in a test session
+	// instead of over the chart default of ten hours.
+	flagResyncPeriod = "resync-period"
 )
 
 // newDeployCommand builds the `deploy` subcommand, which builds a single
@@ -62,11 +54,42 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			"checked-out source with the code-generator's build-controller-image.sh script, pushes " +
 			"the image to ECR, and runs `helm upgrade --install` to deploy the controller with the " +
 			"freshly built image.\n\n" +
-			"The service may be a bare alias (ecr) or its full form (ecr-controller). By default the " +
-			"image is tagged with the controller's checked-out HEAD short SHA and the ECR repository " +
-			"is named after the controller; override these with --image-tag and --repository. Use " +
-			"--namespace to install into a namespace other than ack-system and --region to push to " +
-			"and configure a region other than the one resolved from your AWS configuration.\n\n" +
+			"The service may be a bare alias (ecr) or its full form (ecr-controller).\n\n" +
+			"Fixed destination: a controller always occupies the same place, and none of it is " +
+			"selectable. The ECR repository is named after the controller (<service>-controller), the " +
+			"install goes into the " + deployer.Namespace + " namespace, the Helm release is " +
+			"ack-<service>-controller, and the controller runs under the " +
+			deployer.SharedServiceAccount + " service account.\n\n" +
+			"The namespace and service account are fixed together because they are the two halves of " +
+			"one key: an EKS Pod Identity association is keyed on exactly one (namespace, service " +
+			"account) pair and supports no wildcards, so credentials reach a controller only if its " +
+			"install matches the association on both. One shared account lets a single association " +
+			"cover every controller on the cluster; a controller deployed under any other account, " +
+			"including the per-service one the chart would create, starts with no credentials and " +
+			"exits with \"unable to determine account info\". Fixing the repository and release the " +
+			"same way means two deploys of one controller can never disagree about where it lives. " +
+			"Use --region to push to and configure a region other than the one resolved from your " +
+			"AWS configuration.\n\n" +
+			"Image identity: the image is always tagged with the controller's checked-out HEAD short " +
+			"SHA, and the working tree must be clean -- a controller with uncommitted changes is " +
+			"refused. The tag therefore identifies exactly the source the image was built from, which " +
+			"makes the deploy deterministic: the same commit always produces the same tag, and the " +
+			"tag always describes what is running. There is no tag override, because a tag chosen " +
+			"independently of the source cannot carry that guarantee.\n\n" +
+			"Image reuse: because the tag identifies the source, a tag already present in ECR proves " +
+			"an image built from this exact source exists, so the build and push are skipped and that " +
+			"image is deployed. Redeploying the same commit -- to retry a failed rollout, or to change " +
+			"a chart value such as the resync period -- therefore costs a rollout rather than a full " +
+			"image build, with no flag needed and no risk of deploying something other than the " +
+			"checked-out commit. A registry lookup that fails is an error and the deploy stops: " +
+			"build-or-reuse is decided from the registry or not at all.\n\n" +
+			"Resync period: the chart resyncs every 36000 seconds (ten hours) by default, which " +
+			"makes any behavior that only appears across reconciles — a perpetual delta from a " +
+			"reference resolving to a different form than the API returns, or a server-side default " +
+			"that is never captured into the spec — impractical to observe. Pass --resync-period 60 " +
+			"to shorten it. Setting it on the deploy rather than a follow-up `helm upgrade` matters " +
+			"because deploy installs the chart with its default values, so an override applied " +
+			"beforehand is discarded.\n\n" +
 			"Target cluster: every deploy targets " + deployer.ClusterName + " in the resolved " +
 			"region. The cluster is not selectable and your current kubeconfig context is never used " +
 			"as-is; deploy repoints the kubeconfig at " + deployer.ClusterName + " on every run, so a " +
@@ -81,12 +104,6 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			"AdministratorAccess by default, which suits a throwaway development account and nothing " +
 			"else -- scope it down with --cluster-policy-arn anywhere else. Pin the Kubernetes " +
 			"version with --cluster-version; by default eksctl chooses it.\n\n" +
-			"Service account: the controller runs under the " + deployer.SharedServiceAccount + " " +
-			"service account the cluster binds credentials to, because pod identity associations are " +
-			"keyed on a single (namespace, service account) pair and cannot cover a namespace as a " +
-			"whole. The chart's own service account would carry no credential binding, leaving the " +
-			"controller to exit at startup with \"unable to determine account info\". Pass " +
-			"--service-account to use a different account and an association is created for it.\n\n" +
 			"Pass --dry-run to preview the steps without creating a cluster, changing your " +
 			"kubeconfig, building, pushing, or modifying anything.",
 		Args: cobra.MaximumNArgs(1),
@@ -97,13 +114,10 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 				return err
 			}
 
-			namespace, _ := cmd.Flags().GetString(flagNamespace)
-			imageTag, _ := cmd.Flags().GetString(flagImageTag)
-			repository, _ := cmd.Flags().GetString(flagRepository)
 			region, _ := cmd.Flags().GetString(flagRegion)
-			serviceAccount, _ := cmd.Flags().GetString(flagServiceAccount)
 			clusterVersion, _ := cmd.Flags().GetString(flagClusterVersion)
 			policyARNs, _ := cmd.Flags().GetStringSlice(flagClusterPolicyARN)
+			resyncPeriod, _ := cmd.Flags().GetInt(flagResyncPeriod)
 
 			// A missing service identifier is validated by the deployer (which returns a
 			// *deployer.UsageError) so the rule is enforced in a single place.
@@ -113,13 +127,10 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			}
 
 			summary, err := d.deployRun(cmdContext(cmd), a, service, deployer.Options{
-				Namespace:      namespace,
-				ImageTag:       imageTag,
-				Repository:     repository,
 				Region:         region,
-				ServiceAccount: serviceAccount,
 				ClusterVersion: clusterVersion,
 				PolicyARNs:     policyARNs,
+				ResyncPeriod:   resyncPeriod,
 			})
 			if err != nil {
 				return err
@@ -128,12 +139,9 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().String(flagNamespace, "", "Kubernetes namespace to install the controller into (default \"ack-system\")")
-	cmd.Flags().String(flagImageTag, "", "image tag to build and deploy (default the controller's HEAD short SHA)")
-	cmd.Flags().String(flagRepository, "", "ECR repository name (default \"<service>-controller\")")
 	cmd.Flags().String(flagRegion, "", "AWS region to push to and configure the controller for (default the resolved AWS config region)")
-	cmd.Flags().String(flagServiceAccount, "", fmt.Sprintf("run the controller under this service account, creating a pod identity association for it (default %q, the account the cluster already binds credentials to)", deployer.SharedServiceAccount))
 	cmd.Flags().String(flagClusterVersion, "", fmt.Sprintf("Kubernetes version used if the %s cluster has to be created (default eksctl's own default version)", deployer.ClusterName))
 	cmd.Flags().StringSlice(flagClusterPolicyARN, nil, fmt.Sprintf("IAM policy ARNs attached to the cluster's pod identity role when it has to be created; repeat or comma-separate for several (default %q, appropriate only for a throwaway development account)", deployer.DefaultPolicyARN))
+	cmd.Flags().Int(flagResyncPeriod, 0, "controller default resync period in seconds, set as reconcile.defaultResyncPeriod on the chart (default the chart's own 36000, ten hours); use a small value such as 60 to observe behavior that only appears across reconciles")
 	return cmd
 }

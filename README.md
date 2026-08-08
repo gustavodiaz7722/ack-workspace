@@ -346,24 +346,57 @@ This will:
    **creating it when absent**,
 4. build the controller image from your checked-out source by running the code-generator's
    `./scripts/build-controller-image.sh ecr`, tagging it
-   `<account>.dkr.ecr.<region>.amazonaws.com/ecr-controller:<HEAD-sha>`,
+   `<account>.dkr.ecr.<region>.amazonaws.com/ecr-controller:<HEAD-sha>` — **unless that tag is
+   already in ECR**, in which case steps 4 and 5 are skipped and the existing image is used,
 5. push the image to ECR (`aws ecr get-login-password` → `docker login` → `docker push`),
    and
 6. `helm upgrade --install ack-ecr-controller <controller>/helm` into the `ack-system`
-   namespace, pointing the deployment at the freshly pushed image.
+   namespace, pointing the deployment at that image.
 
-The service may be a bare alias (`ecr`) or its full form (`ecr-controller`). By default the
-image is tagged with the controller's checked-out HEAD short SHA, so each build is
-traceable to the exact local commit. Useful flags:
+The service may be a bare alias (`ecr`) or its full form (`ecr-controller`). Useful flags:
 
 ```bash
 ack-workspace deploy ecr --dry-run                     # preview every step; changes nothing
-ack-workspace deploy ecr --image-tag dev               # use a fixed tag instead of the HEAD SHA
-ack-workspace deploy ecr --namespace ack-test          # install into a different namespace
-ack-workspace deploy ecr --repository my-ecr-controller  # override the ECR repository name
 ack-workspace deploy ecr --region us-west-2            # target a specific region
-ack-workspace deploy ecr --service-account ack-ecr-controller  # bind credentials to another account
+ack-workspace deploy ecr --resync-period 60            # resync every 60s instead of the chart's 10h
 ```
+
+#### A controller always lands in the same place
+
+The ECR repository (`<service>-controller`), the namespace (`ack-system`), the Helm release
+(`ack-<service>-controller`), and the service account the controller runs under
+(`ack-controller`) are all fixed. None of them is selectable.
+
+The namespace and service account could not be flags even if you wanted them to be. They are the
+two halves of one key: an EKS Pod Identity association is keyed on exactly one
+(namespace, service account) pair and supports no wildcards, so credentials reach a controller only
+if its install matches the association on both. One shared account is what lets a single
+association cover every controller on the cluster. A controller deployed under any other account —
+including the per-service one the chart creates by default — starts with no credentials and exits
+with `unable to determine account info`.
+
+Fixing the repository and release the same way means two deploys of one controller can never
+disagree about where it lives: no second ECR repository accumulating a divergent image history, no
+parallel release to reconcile.
+
+#### A deploy is identified by its commit
+
+The image tag is **always** the controller's checked-out HEAD short SHA, and the working tree
+must be clean — a controller with uncommitted changes is refused. There is no tag override.
+
+Those two rules together make the tag a complete description of the image's source: the same
+commit always yields the same tag, and the tag always names source you can check out. That is
+what makes the reuse in step 4 safe rather than a gamble — a tag present in ECR *proves* an
+image built from exactly this source exists, so redeploying a commit (retrying a failed
+rollout, or changing a chart value) costs a rollout instead of a full image build, with no flag
+to remember and no way to accidentally deploy something other than what you committed.
+
+The alternative was a tag override plus a force-rebuild escape hatch, where a stale image
+deploys successfully and silently whenever the tag stops tracking the source. Refusing a dirty
+tree removes the failure mode instead of adding a flag to work around it.
+
+If the ECR lookup itself fails — expired credentials, no network — the deploy stops rather than
+guessing whether to build.
 
 #### The development cluster
 
@@ -390,8 +423,8 @@ configuration and then installs the controller:
 - **The shared `ack-controller` service account**, which the controller is deployed under.
   Associations are keyed on `(namespace, serviceAccountName)` and do not support wildcards, so
   one shared account lets a single association cover every controller you deploy to the
-  cluster. Name a different account with `--service-account` and an association is created for
-  that one instead.
+  cluster. That is why the account is fixed rather than selectable — see
+  [a controller always lands in the same place](#a-controller-always-lands-in-the-same-place).
 
 **The cluster is meant to be long-lived.** Create it once and keep it: every provisioning step
 is idempotent, so each later deploy only fills in what is missing — including adding an
