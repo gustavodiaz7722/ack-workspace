@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws-controllers-k8s/ack-workspace/cmd"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/adder"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -59,6 +60,14 @@ func TestExitCodeFor(t *testing.T) {
 			name:       "adder usage error exits usage code",
 			hasSummary: false,
 			err:        &adder.UsageError{Msg: "at least one service identifier is required"},
+			want:       exitUsage,
+		},
+		{
+			// Regression: the deployer's usage error was missing from the mapping, so
+			// `deploy` with no service reported a runtime failure.
+			name:       "deployer usage error exits usage code",
+			hasSummary: false,
+			err:        &deployer.UsageError{Msg: "a service identifier is required"},
 			want:       exitUsage,
 		},
 		{
