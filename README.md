@@ -34,6 +34,11 @@ automates it.
   environment overrides (`RUNTIME_CRD_DIR`, `ACK_GENERATE_BIN_PATH`, `TEMPLATES_DIR`) that
   the code-generator scripts otherwise resolve relative to a workspace root literally named
   `aws-controllers-k8s`, so the build succeeds from any workspace root.
+- **`test`** — run a single service controller's end-to-end suite (its `test/e2e` directory)
+  against the controller already running on the development cluster: create the suite's AWS
+  fixtures, run pytest, tear the fixtures down. It is the follow-on to `deploy`, never a
+  replacement for it, and it will not start unless the kubeconfig selects `ack-dev-auto` and
+  the controller has a ready replica there. Requires `kubectl` and `python3`.
 - **`status`** — report the state of every managed repository (branch, dirty flag,
   ahead/behind vs. upstream) as a table or JSON.
 - **`candidates`** — emit the deterministic cross-resource-reference candidate index for a
@@ -100,9 +105,10 @@ missing 4 prerequisites:
 | `release`| `git`² | yes³ | yes |
 | `build`  | `git`, `make`, `go`⁴ | no | no |
 | `deploy` | `git`, `docker`, `aws`, `kubectl`, `helm`, `eksctl`⁵ | no | no |
+| `test`   | `git`, `kubectl`, `python3`⁶ | no | no |
 | `status` | `git` | no | no |
-| `attribution` | `git`⁶ | no | no |
-| `candidates` | — ⁷ | no | no |
+| `attribution` | `git`⁷ | no | no |
+| `candidates` | — ⁸ | no | no |
 | `config` | — | no | no |
 
 ¹ `refresh` needs a token and identity to sync your fork from upstream via the GitHub API.
@@ -121,12 +127,17 @@ would otherwise surface as a confusing failure from inside `make`.
 be created: learning you cannot create one is worth knowing before a 20-minute image build,
 not after.
 
-⁶ `attribution` runs the generation on CodeBuild through the AWS SDK, so it needs no AWS CLI.
+⁶ `test` needs `git` because the suites pin the `acktest` library as a git URL, which `pip`
+resolves by cloning it; `python3` builds the virtual environment the suite then runs from.
+`pytest` itself is not checked, because it lives inside that environment rather than on your
+`PATH`.
 
-⁷ `candidates` shells out to nothing. It reads local repositories and fetches the public AWS
+⁷ `attribution` runs the generation on CodeBuild through the AWS SDK, so it needs no AWS CLI.
+
+⁸ `candidates` shells out to nothing. It reads local repositories and fetches the public AWS
 API models over HTTPS.
 
-**AWS credentials are not pre-flighted.** `deploy` and `attribution` resolve them from the
+**AWS credentials are not pre-flighted.** `deploy`, `test`, and `attribution` resolve them from the
 default chain when they run, so an expired session surfaces as a failure at that point rather
 than up front. The same goes for anything else that needs a network round-trip to answer:
 whether a token's scopes suffice, whether a cluster is reachable. Keeping the prerequisite
@@ -456,6 +467,69 @@ they created; those are not removed with the cluster.
 ```bash
 eksctl delete cluster --name ack-dev-auto --region us-west-2
 ```
+
+### Run a controller's end-to-end suite
+
+`test` runs a controller's `test/e2e` suite against the controller **already running** on the
+development cluster: it creates the suite's AWS fixtures with `service_bootstrap.py`, runs
+pytest over the suite, and deletes those fixtures again with `service_cleanup.py`.
+
+```bash
+ack-workspace test acm
+```
+
+It is the follow-on to `deploy`, not a replacement for it — `test` never builds an image,
+creates a cluster, or installs a controller. Before running anything it confirms three things
+and reports what it found:
+
+| Check | Not satisfied |
+|-------|---------------|
+| The kubeconfig selects the `ack-dev-auto` cluster | skipped, naming the `deploy` to run |
+| The cluster answers a read | failed |
+| The controller has a ready replica in `ack-system` | skipped, naming the `deploy` to run |
+
+The cluster is not selectable, for the same reason it is not selectable on `deploy`: where a
+suite ran is the one thing its output cannot tell you afterwards, so a suite pointed at the
+wrong cluster fails in ways that look like product bugs.
+
+```bash
+ack-workspace test acm --dry-run                    # print the commands; provision nothing
+ack-workspace test acm --methods test_invalid       # one test by name
+ack-workspace test acm --markers canary             # by pytest marker
+ack-workspace test acm --threads 4                  # fewer xdist workers, when AWS throttles
+ack-workspace test acm --region eu-west-1           # pin where the suite creates resources
+ack-workspace test acm --skip-cleanup               # keep the fixtures to inspect a failure
+```
+
+Several `--markers` or `--methods` values are combined into a single pytest expression
+(`canary or slow`), rather than passed as repeated flags, which pytest resolves by keeping only
+the last one.
+
+**The Python environment lives outside the controller checkout.** The suite's pinned
+requirements are installed into `$HOME/.ack-workspace/venvs/<service>-controller`, created on
+the first run and reused after; it is reinstalled automatically when the suite repins its
+requirements, tracked by a digest of `requirements.txt`. The documented ACK setup puts this
+`.venv` inside `test/e2e`, but a controller's `.gitignore` does not cover it, so an
+in-checkout environment leaves untracked files that `status` reports as dirty and `deploy`
+refuses outright. An existing `test/e2e/.venv` **is** used when it is already there, so a
+hand-built environment is never duplicated.
+
+**The outcome is pytest's alone**, so a failure always means a test failed. The fixtures are
+torn down even when tests fail, and even after a failed bootstrap that may have created part
+of them; a teardown that itself fails is reported in the summary, naming the AWS resources
+that may remain, rather than folded into the outcome.
+
+> **Caution:** a suite creates real AWS resources in whatever account your credentials resolve
+> to and deletes them on teardown, so run it against a development account. `--skip-cleanup`
+> leaves them in place, and they keep costing until you delete them by hand.
+
+It does not go through test-infra's `scripts/run-e2e-tests.sh`. That script sources `kind.sh`,
+`controller-setup.sh`, and `pytest-image-runner.sh` unconditionally, each of which checks its
+own binaries on being sourced, so it will not start without `kind`, `kustomize`, `docker`,
+`jq`, `uuidgen`, and `yq` plus a `test_config.yaml` — all of it in service of the path that
+creates a KIND cluster and installs a controller, which `deploy` already owns. What is left is
+the three commands `scripts/pytest-local-runner.sh` runs, and the pytest invocation is kept
+identical to the upstream one.
 
 ### Inspect workspace status
 

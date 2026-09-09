@@ -20,6 +20,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/cli"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/deployer"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/tester"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -117,7 +118,7 @@ func exitCodeFor(summary workspace.Summary, hasSummary bool, err error) int {
 // isUsageError reports whether err is (or wraps) one of the typed usage errors
 // a component returns for bad arguments: invalid concurrency and other root
 // validation, an empty add or attribution identifier list, a missing service
-// identifier for build, deploy, or release, or an invalid release version.
+// identifier for build, deploy, test, or release, or an invalid release version.
 // Every component that can reject its arguments before doing work must appear
 // here, or its usage error is reported as a generic runtime failure.
 func isUsageError(err error) bool {
@@ -127,7 +128,9 @@ func isUsageError(err error) bool {
 	var builderUsage *builder.UsageError
 	var deployerUsage *deployer.UsageError
 	var attributorUsage *attributor.UsageError
+	var testerUsage *tester.UsageError
 	return errors.As(err, &cmdUsage) || errors.As(err, &adderUsage) ||
 		errors.As(err, &releaserUsage) || errors.As(err, &builderUsage) ||
-		errors.As(err, &deployerUsage) || errors.As(err, &attributorUsage)
+		errors.As(err, &deployerUsage) || errors.As(err, &attributorUsage) ||
+		errors.As(err, &testerUsage)
 }

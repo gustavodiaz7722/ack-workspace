@@ -24,6 +24,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/refresher"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/tester"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -131,6 +132,11 @@ type deps struct {
 	// controller's code from local source via the code-generator's `make
 	// build-controller` target.
 	buildRun func(ctx context.Context, a app.App, service, sdkVersion string) (workspace.Summary, error)
+	// testRun runs the tester for the test command: it runs the controller's
+	// end-to-end suite against the controller already deployed on the development
+	// cluster. The writer receives the suite's own output as it is produced, which
+	// for a run lasting tens of minutes is the only useful way to present it.
+	testRun func(ctx context.Context, a app.App, service string, opts tester.Options, out io.Writer) (workspace.Summary, error)
 	// candidatesRun runs the Indexer for the candidates command: it
 	// emits the deterministic cross-resource-reference candidate index. Records
 	// are written to out and progress/suppression notes to errOut, so stdout stays
@@ -179,6 +185,9 @@ func defaultDeps() deps {
 			return builder.New().Build(ctx, a, service, builder.Options{
 				SDKVersion: sdkVersion,
 			})
+		},
+		testRun: func(ctx context.Context, a app.App, service string, opts tester.Options, out io.Writer) (workspace.Summary, error) {
+			return tester.NewWithWriter(out).Test(ctx, a, service, opts)
 		},
 		candidatesRun: func(ctx context.Context, a app.App, opts candidates.Options, out, errOut io.Writer) (workspace.Summary, error) {
 			return candidates.NewIndexer(a.Config.Token, out, errOut).Candidates(ctx, a, opts)
@@ -231,6 +240,7 @@ func newRootCmd(d deps) (*cobra.Command, *Result) {
 		newReleaseCommand(d, res),
 		newDeployCommand(d, res),
 		newBuildCommand(d, res),
+		newTestCommand(d, res),
 		newCandidatesCommand(d, res),
 		newAttributionCommand(d, res),
 		newConfigCommand(),

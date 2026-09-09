@@ -47,6 +47,10 @@ const (
 	Helm
 	// Eksctl creates the development cluster and its pod identity association.
 	Eksctl
+	// Python creates the virtual environment an end-to-end suite runs in. It is
+	// the interpreter used to build that environment, not the one the suite runs
+	// under: that one lives inside the environment and is addressed absolutely.
+	Python
 )
 
 // tools lists every Tool with the executable name resolved on the PATH, in bit
@@ -64,6 +68,7 @@ var tools = []struct {
 	{Kubectl, "kubectl"},
 	{Helm, "helm"},
 	{Eksctl, "eksctl"},
+	{Python, "python3"},
 }
 
 // Need declares what a command requires. Tools must resolve on the PATH; Token

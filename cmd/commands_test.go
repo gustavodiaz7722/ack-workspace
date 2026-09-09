@@ -20,6 +20,7 @@ import (
 	"github.com/aws-controllers-k8s/ack-workspace/internal/prereq"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/releaser"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/remover"
+	"github.com/aws-controllers-k8s/ack-workspace/internal/tester"
 	"github.com/aws-controllers-k8s/ack-workspace/internal/workspace"
 )
 
@@ -70,6 +71,10 @@ type recorder struct {
 	buildCalled     bool
 	buildService    string
 	buildSDKVersion string
+
+	testCalled  bool
+	testService string
+	testOpts    tester.Options
 
 	attributionCalled bool
 	attributionIDs    []string
@@ -141,6 +146,12 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 			rec.buildCalled = true
 			rec.buildService = service
 			rec.buildSDKVersion = sdkVersion
+			return rec.summary, rec.runErr
+		},
+		testRun: func(ctx context.Context, a app.App, service string, opts tester.Options, out io.Writer) (workspace.Summary, error) {
+			rec.testCalled = true
+			rec.testService = service
+			rec.testOpts = opts
 			return rec.summary, rec.runErr
 		},
 		attributionRun: func(ctx context.Context, a app.App, identifiers []string, opts attributor.Options, region string, out io.Writer) (workspace.Summary, error) {
@@ -803,6 +814,114 @@ func TestBuild_EmptyServiceSurfacesUsageError(t *testing.T) {
 	var ue *builder.UsageError
 	if !errors.As(err, &ue) {
 		t.Fatalf("error type = %T, want *builder.UsageError", err)
+	}
+}
+
+// --- test command ------------------------------------------------------------
+
+func TestTest_NeedsGitKubectlAndPython(t *testing.T) {
+	isolateEnv(t)
+	chk := &fakeChecker{}
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(chk, rec),
+		"test", "ecr", "--"+config.FlagGitHubUser, "octocat")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !chk.called {
+		t.Fatal("prerequisite checker was not called")
+	}
+	// kubectl reads the cluster state, python3 builds the environment, and git is
+	// there because the suites pin acktest as a git URL that pip resolves by
+	// cloning -- a missing one should be reported before any environment is built.
+	want := prereq.Need{Tools: prereq.Git | prereq.Kubectl | prereq.Python}
+	if chk.gotNeed != want {
+		t.Errorf("Need = %+v, want %+v", chk.gotNeed, want)
+	}
+	if !rec.testCalled {
+		t.Error("testRun was not called")
+	}
+	if rec.testService != "ecr" {
+		t.Errorf("service = %q, want ecr", rec.testService)
+	}
+}
+
+func TestTest_ParsesSelectionAndRunFlags(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"test", "ecr-controller",
+		"--"+flagMarkers, "canary,slow",
+		"--"+flagMethods, "test_topic",
+		"--"+flagRegion, "eu-west-1",
+		"--"+flagThreads, "4",
+		"--"+flagLogLevel, "debug",
+		"--"+flagSkipCleanup,
+		"--"+config.FlagGitHubUser, "octocat")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.testCalled {
+		t.Fatal("testRun was not called")
+	}
+	if rec.testService != "ecr-controller" {
+		t.Errorf("service = %q, want ecr-controller (normalization belongs to the component)", rec.testService)
+	}
+
+	opts := rec.testOpts
+	if got := strings.Join(opts.Markers, ","); got != "canary,slow" {
+		t.Errorf("markers = %q, want \"canary,slow\"", got)
+	}
+	if got := strings.Join(opts.Methods, ","); got != "test_topic" {
+		t.Errorf("methods = %q, want test_topic", got)
+	}
+	if opts.Region != "eu-west-1" {
+		t.Errorf("region = %q, want eu-west-1", opts.Region)
+	}
+	if opts.Threads != "4" {
+		t.Errorf("threads = %q, want 4", opts.Threads)
+	}
+	if opts.LogLevel != "debug" {
+		t.Errorf("log level = %q, want debug", opts.LogLevel)
+	}
+	if !opts.SkipCleanup {
+		t.Error("skip-cleanup was not passed through")
+	}
+}
+
+func TestTest_DefaultsLeaveOptionsEmpty(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"test", "ecr", "--"+config.FlagGitHubUser, "octocat")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	// Unset flags must arrive empty rather than pre-filled, so the upstream pytest
+	// defaults live in exactly one place: the component.
+	opts := rec.testOpts
+	if opts.Region != "" || opts.Threads != "" || opts.LogLevel != "" || opts.SkipCleanup {
+		t.Errorf("options = %+v, want the zero value when no flags are set", opts)
+	}
+	if len(opts.Markers) != 0 || len(opts.Methods) != 0 {
+		t.Errorf("selection = %+v, want no selectors when no flags are set", opts)
+	}
+}
+
+func TestTest_EmptyServiceSurfacesUsageError(t *testing.T) {
+	isolateEnv(t)
+	// Use the real tester so the service-required rule is enforced where it lives.
+	// A passing checker isolates the tester's behavior.
+	d := defaultDeps()
+	d.checker = &fakeChecker{}
+
+	_, _, err := runCmd(t, d, "test", "--"+config.FlagGitHubUser, "octocat")
+	if err == nil {
+		t.Fatal("expected a usage error for a missing service, got nil")
+	}
+	var ue *tester.UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("error type = %T, want *tester.UsageError", err)
 	}
 }
 
