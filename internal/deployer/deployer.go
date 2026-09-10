@@ -664,11 +664,22 @@ func (execCluster) Deploy(ctx context.Context, p DeployParams) error {
 // through plain `--set` precisely because the chart's values schema types it as
 // a number, the opposite of the tag: `--set-string` would make it a string and
 // the schema would reject it.
+//
+// `--force-conflicts` is passed because Helm v4 applies server-side, and a
+// development cluster routinely accumulates other field managers on a
+// controller Deployment. Pointing a controller at an older image with `kubectl
+// set image` — the usual way to check whether a test failure predates a change
+// — hands `.spec.template.spec.containers[].image` to the `kubectl-set`
+// manager, and the next deploy then fails the whole upgrade on that one field.
+// Deploying is an assertion that the chart's rendered state is the state that
+// should be running, so it takes ownership back rather than reporting a
+// conflict the operator would only ever resolve by forcing.
 func helmUpgradeArgs(p DeployParams) []string {
 	args := []string{
 		"upgrade", "--install", p.Release, p.ChartDir,
 		"--namespace", p.Namespace,
 		"--create-namespace",
+		"--force-conflicts",
 		"--set", "image.repository=" + p.ImageRepo,
 		"--set-string", "image.tag=" + p.ImageTag,
 		"--set", "aws.region=" + p.Region,

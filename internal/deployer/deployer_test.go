@@ -113,6 +113,27 @@ func TestHelmUpgradeArgs_CoreArgs(t *testing.T) {
 	}
 }
 
+// TestHelmUpgradeArgs_ForcesFieldManagerConflicts covers the deploy-after-
+// kubectl-set failure: Helm v4 applies server-side, so once another field
+// manager owns a field the chart also sets — as `kubectl set image` does to
+// .spec.template.spec.containers[].image when checking a test against an older
+// build — the upgrade aborts on the conflict instead of deploying. A deploy
+// asserts the chart's state, so it must claim the field back.
+func TestHelmUpgradeArgs_ForcesFieldManagerConflicts(t *testing.T) {
+	args := helmUpgradeArgs(DeployParams{
+		ChartDir:  "/charts/ecr",
+		Namespace: "ack-system",
+		Release:   "ack-ecr-controller",
+		ImageRepo: "repo/ecr-controller",
+		ImageTag:  "dev",
+		Region:    "us-west-2",
+	})
+
+	if !hasArg(args, "--force-conflicts") {
+		t.Errorf("expected --force-conflicts so a deploy overrides another field manager, got %v", args)
+	}
+}
+
 // TestHelmUpgradeArgs_AlwaysPinsSharedServiceAccount covers the credential
 // regression: the chart-created service account has no IRSA annotation and is
 // not the account an EKS Pod Identity association is attached to, so a
