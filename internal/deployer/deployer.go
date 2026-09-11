@@ -489,7 +489,7 @@ func (d *Deployer) preview(name string, clusterExists bool, imageRef string, reu
 	}
 
 	reason := fmt.Sprintf(
-		"%swould point the kubeconfig at %s, ensure ECR repository, %s, and helm upgrade --install %s into namespace %s under service account %q%s",
+		"%swould point the kubeconfig at %s, ensure ECR repository, %s, apply the chart's CRDs, and helm upgrade --install %s into namespace %s under service account %q%s",
 		bootstrap, describeCluster(clusterExists), image, p.Release, p.Namespace, SharedServiceAccount, resync)
 	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
@@ -633,11 +633,45 @@ type execCluster struct{}
 // --install`, overriding the image repository and tag, setting the controller's
 // AWS region, and optionally binding it to an existing service account. It
 // creates the target namespace when necessary.
+//
+// The chart's CRDs are applied first, because Helm will not do it. Everything in
+// a chart's `crds/` directory is installed once, on first install, and skipped by
+// every subsequent upgrade — Helm's documented position, since it has no safe
+// general answer for a schema change. The consequence on a long-lived development
+// cluster is that a controller can be running new code against the schema it was
+// first installed with, and a field the code now sets is silently pruned by the
+// API server. That presents as an e2e failure with no controller error and no
+// deploy error, which is close to undiagnosable if you do not already suspect it.
 func (execCluster) Deploy(ctx context.Context, p DeployParams) error {
+	if err := applyChartCRDs(ctx, p.ChartDir); err != nil {
+		return err
+	}
 	args := helmUpgradeArgs(p)
 	cmd := exec.CommandContext(ctx, "helm", args...)
 	if out, err := runCombined(cmd); err != nil {
 		return annotate(fmt.Sprintf("helm upgrade --install %s", p.Release), out, err)
+	}
+	return nil
+}
+
+// applyChartCRDs applies every CRD in the chart's `crds/` directory, so a deploy
+// reconciles the schema as well as the controller. A chart with no `crds/`
+// directory is not an error: not every chart ships CRDs.
+//
+// The apply is server-side with `--force-conflicts`, for the same reason the Helm
+// upgrade is (see helmUpgradeArgs) and for one more specific to CRDs: these
+// schemas are large enough that a client-side apply can exceed the 256 KB limit on
+// the last-applied-configuration annotation it has to write, which fails the apply
+// outright.
+func applyChartCRDs(ctx context.Context, chartDir string) error {
+	crdDir := filepath.Join(chartDir, "crds")
+	if !dirExists(crdDir) {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", "apply",
+		"--server-side", "--force-conflicts", "-f", crdDir)
+	if out, err := runCombined(cmd); err != nil {
+		return annotate(fmt.Sprintf("kubectl apply -f %s", crdDir), out, err)
 	}
 	return nil
 }

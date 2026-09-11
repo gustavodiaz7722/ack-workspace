@@ -14,6 +14,7 @@
 package deployer
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -253,5 +254,26 @@ func TestExecRegistryImageExists_ClassifiesFailures(t *testing.T) {
 				t.Errorf("err = %v, want error: %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestApplyChartCRDs_NoCRDDirectoryIsNotAnError covers the one branch of the CRD
+// apply that is decidable without a cluster.
+//
+// A deploy applies the chart's crds/ directory because Helm will not: it installs
+// everything there once, on first install, and skips it on every upgrade, so a
+// controller ends up running new code against the schema it was first installed
+// with and the API server silently prunes any field the code has since gained.
+// That is how two s3 e2e failures spent this project misfiled as test bugs.
+//
+// But not every chart ships CRDs, and a chart without them must deploy normally
+// rather than fail on a missing path. `kubectl apply -f` on a nonexistent
+// directory is an error, so the absence has to be checked rather than delegated.
+func TestApplyChartCRDs_NoCRDDirectoryIsNotAnError(t *testing.T) {
+	// A chart directory that exists but has no crds/ subdirectory. No kubectl is
+	// reachable from this test, so returning nil is also the assertion that the
+	// command was never run.
+	if err := applyChartCRDs(context.Background(), t.TempDir()); err != nil {
+		t.Errorf("expected a chart without crds/ to deploy normally, got %v", err)
 	}
 }
