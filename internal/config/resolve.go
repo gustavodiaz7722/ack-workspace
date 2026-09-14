@@ -58,41 +58,92 @@ func (e *ParseError) Error() string {
 
 func (e *ParseError) Unwrap() error { return e.Err }
 
+// fileLayers holds the persisted configuration layers found for an invocation.
+type fileLayers struct {
+	// local holds the workspace-local file's values; meaningful only when
+	// localFound is true.
+	local      fileConfig
+	localFound bool
+	// localRoot is the directory holding the workspace-local .ack-workspace
+	// directory, and therefore the workspace root that file implies.
+	localRoot string
+	// global holds the $HOME file's values, zero when that file is absent.
+	global fileConfig
+	// path is the file in effect: the local one when found, else the global one.
+	path string
+}
+
+// loadLayers reads both persisted layers. The global file is always consulted so
+// that a workspace-local file can override individual values without having to
+// restate the ones it shares, notably the GitHub identity.
+func (m *manager) loadLayers() (fileLayers, error) {
+	layers := fileLayers{path: m.GlobalPath()}
+
+	global, err := m.loadFile(m.GlobalPath())
+	if err != nil {
+		return fileLayers{}, err
+	}
+	layers.global = global
+
+	if path, root, ok := m.discover(); ok {
+		local, err := m.loadFile(path)
+		if err != nil {
+			return fileLayers{}, err
+		}
+		layers.local, layers.localFound, layers.localRoot, layers.path = local, true, root, path
+	}
+
+	return layers, nil
+}
+
 // Resolve applies per-value precedence, highest first: command-line flag value,
-// then environment variable value (where one is defined for that value), then
-// the persisted file value, then the default value. The selected value applies
-// only for this invocation.
+// then environment variable value (where one is defined for that value), then the
+// workspace-local file value, then the global file value, then the default value.
+// The selected value applies only for this invocation.
 //
-// The persisted TOML file at Path() is read when present. A missing file is
-// acceptable; so is a missing GitHub identity, which resolves to the empty
-// string. Whether an identity is required depends on the command -- only the
-// ones that name a fork need one -- so that is enforced per command by
-// internal/prereq rather than here. The only error is a *ParseError, for a file
-// that exists but cannot be parsed.
+// Both persisted TOML files are read when present. A missing file is acceptable;
+// so is a missing GitHub identity, which resolves to the empty string. Whether an
+// identity is required depends on the command -- only the ones that name a fork
+// need one -- so that is enforced per command by internal/prereq rather than
+// here. The only error is a *ParseError, for a file that exists but cannot be
+// parsed.
 func (m *manager) Resolve(src Source) (Config, error) {
-	persisted, err := m.loadFile()
+	layers, err := m.loadLayers()
 	if err != nil {
 		return Config{}, err
 	}
 
 	var cfg Config
 
-	// GitHubUser: flag > env > persisted. No default.
+	// GitHubUser: flag > env > local file > global file. No default.
 	if v, ok := lookup(src.Flags, FlagGitHubUser); ok {
 		cfg.GitHubUser = v
 	} else if v, ok := lookup(src.Env, EnvGitHubUser); ok {
 		cfg.GitHubUser = v
+	} else if layers.local.GitHubUser != "" {
+		cfg.GitHubUser = layers.local.GitHubUser
 	} else {
-		cfg.GitHubUser = persisted.GitHubUser
+		cfg.GitHubUser = layers.global.GitHubUser
 	}
 
-	// WorkspaceRoot: flag > persisted > default, expanded to an absolute path
-	//. No environment variable is defined for this value.
+	// WorkspaceRoot: flag > local file > the local file's own directory > global
+	// file > default, expanded to an absolute path. No environment variable is
+	// defined for this value.
+	//
+	// The local file's own directory outranks the global file because standing
+	// inside a workspace is a stronger statement of intent than a root persisted
+	// once for the whole machine. That ordering is what lets a workspace-local file
+	// carry no workspace_root at all and still redirect every command to its own
+	// tree.
 	workspaceRoot := ""
 	if v, ok := lookup(src.Flags, FlagWorkspaceRoot); ok {
 		workspaceRoot = v
-	} else if persisted.WorkspaceRoot != "" {
-		workspaceRoot = persisted.WorkspaceRoot
+	} else if layers.local.WorkspaceRoot != "" {
+		workspaceRoot = layers.local.WorkspaceRoot
+	} else if layers.localFound {
+		workspaceRoot = layers.localRoot
+	} else if layers.global.WorkspaceRoot != "" {
+		workspaceRoot = layers.global.WorkspaceRoot
 	}
 	if workspaceRoot == "" {
 		workspaceRoot = m.defaultWorkspaceRoot()
@@ -103,23 +154,28 @@ func (m *manager) Resolve(src Source) (Config, error) {
 	}
 	cfg.WorkspaceRoot = abs
 
-	// RepoPrefix: flag > persisted > default. No environment variable is defined
-	// for this value.
+	// RepoPrefix: flag > local file > global file > default. No environment
+	// variable is defined for this value.
 	if v, ok := lookup(src.Flags, FlagRepoPrefix); ok {
 		cfg.RepoPrefix = v
-	} else if persisted.RepoPrefix != "" {
-		cfg.RepoPrefix = persisted.RepoPrefix
+	} else if layers.local.RepoPrefix != "" {
+		cfg.RepoPrefix = layers.local.RepoPrefix
+	} else if layers.global.RepoPrefix != "" {
+		cfg.RepoPrefix = layers.global.RepoPrefix
 	} else {
 		cfg.RepoPrefix = DefaultRepoPrefix
 	}
 
-	// Concurrency: flag > persisted > default. No environment variable is defined
-	// for this value. The 1..32 range is enforced by the command layer
-	// (cmd.validateConcurrency), which rejects an out-of-range value before any
-	// work starts; resolution only decides which value wins.
+	// Concurrency: flag > local file > global file > default. No environment
+	// variable is defined for this value. The 1..32 range is enforced by the
+	// command layer (cmd.validateConcurrency), which rejects an out-of-range value
+	// before any work starts; resolution only decides which value wins.
 	cfg.Concurrency = DefaultConcurrency
-	if persisted.Concurrency != 0 {
-		cfg.Concurrency = persisted.Concurrency
+	if layers.global.Concurrency != 0 {
+		cfg.Concurrency = layers.global.Concurrency
+	}
+	if layers.local.Concurrency != 0 {
+		cfg.Concurrency = layers.local.Concurrency
 	}
 	if v, ok := lookup(src.Flags, FlagConcurrency); ok {
 		n, err := strconv.Atoi(strings.TrimSpace(v))
@@ -136,17 +192,16 @@ func (m *manager) Resolve(src Source) (Config, error) {
 		cfg.Token = v
 	}
 
-	cfg.Path = m.Path()
+	cfg.Path = layers.path
 
 	return cfg, nil
 }
 
-// loadFile reads the persisted configuration file, returning a zero fileConfig
-// when it does not exist — an absent file is the normal state before the first
+// loadFile reads a persisted configuration file, returning a zero fileConfig when
+// it does not exist — an absent file is the normal state before the first
 // `config set`. A file that exists but cannot be read or parsed yields a
 // *ParseError naming the path.
-func (m *manager) loadFile() (fileConfig, error) {
-	path := m.Path()
+func (m *manager) loadFile(path string) (fileConfig, error) {
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fileConfig{}, nil

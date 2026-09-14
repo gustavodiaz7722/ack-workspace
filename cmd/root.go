@@ -293,7 +293,7 @@ func cmdContext(cmd *cobra.Command) context.Context {
 // key.
 func addPersistentFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
-	pf.String(config.FlagWorkspaceRoot, "", "workspace root directory (default $GOPATH/src/github.com/aws-controllers-k8s)")
+	pf.String(config.FlagWorkspaceRoot, "", "workspace root directory (default: the enclosing workspace-local config's directory, else $GOPATH/src/github.com/aws-controllers-k8s)")
 	pf.String(config.FlagGitHubUser, "", "GitHub username that owns the forks")
 	pf.String(config.FlagRepoPrefix, "", fmt.Sprintf("prefix prepended to fork names (default %q)", config.DefaultRepoPrefix))
 	pf.Int(config.FlagConcurrency, config.DefaultConcurrency, fmt.Sprintf("maximum repositories processed concurrently (%d-%d)", minConcurrency, maxConcurrency))

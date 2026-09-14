@@ -295,3 +295,237 @@ func TestResolveRecordsConfigPath(t *testing.T) {
 		t.Errorf("Path = %q, want %q", cfg.Path, m.Path())
 	}
 }
+
+// TestResolveLayerPrecedenceMatrix verifies, per configuration value, that a
+// workspace-local file outranks the global file and that a flag still outranks
+// both. Each case writes both layers so the winner is unambiguous.
+func TestResolveLayerPrecedenceMatrix(t *testing.T) {
+	cases := []struct {
+		name   string
+		global fileConfig
+		local  fileConfig
+		flags  map[string]string
+		check  func(t *testing.T, got Config)
+	}{
+		{
+			name:   "local github user overrides global",
+			global: fileConfig{GitHubUser: "globaluser"},
+			local:  fileConfig{GitHubUser: "localuser"},
+			check: func(t *testing.T, got Config) {
+				if got.GitHubUser != "localuser" {
+					t.Errorf("GitHubUser = %q, want %q", got.GitHubUser, "localuser")
+				}
+			},
+		},
+		{
+			name:   "flag overrides local github user",
+			global: fileConfig{GitHubUser: "globaluser"},
+			local:  fileConfig{GitHubUser: "localuser"},
+			flags:  map[string]string{FlagGitHubUser: "flaguser"},
+			check: func(t *testing.T, got Config) {
+				if got.GitHubUser != "flaguser" {
+					t.Errorf("GitHubUser = %q, want %q", got.GitHubUser, "flaguser")
+				}
+			},
+		},
+		{
+			name:   "local prefix overrides global",
+			global: fileConfig{RepoPrefix: "global-"},
+			local:  fileConfig{RepoPrefix: "local-"},
+			check: func(t *testing.T, got Config) {
+				if got.RepoPrefix != "local-" {
+					t.Errorf("RepoPrefix = %q, want %q", got.RepoPrefix, "local-")
+				}
+			},
+		},
+		{
+			name:   "flag overrides local prefix",
+			global: fileConfig{RepoPrefix: "global-"},
+			local:  fileConfig{RepoPrefix: "local-"},
+			flags:  map[string]string{FlagRepoPrefix: "flag-"},
+			check: func(t *testing.T, got Config) {
+				if got.RepoPrefix != "flag-" {
+					t.Errorf("RepoPrefix = %q, want %q", got.RepoPrefix, "flag-")
+				}
+			},
+		},
+		{
+			name:   "local concurrency overrides global",
+			global: fileConfig{Concurrency: 2},
+			local:  fileConfig{Concurrency: 16},
+			check: func(t *testing.T, got Config) {
+				if got.Concurrency != 16 {
+					t.Errorf("Concurrency = %d, want %d", got.Concurrency, 16)
+				}
+			},
+		},
+		{
+			name:   "flag overrides local concurrency",
+			global: fileConfig{Concurrency: 2},
+			local:  fileConfig{Concurrency: 16},
+			flags:  map[string]string{FlagConcurrency: "32"},
+			check: func(t *testing.T, got Config) {
+				if got.Concurrency != 32 {
+					t.Errorf("Concurrency = %d, want %d", got.Concurrency, 32)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			root := t.TempDir()
+			writeConfigFile(t, filepath.Join(home, configDirName, configFileName), tc.global)
+			writeConfigFile(t, filepath.Join(root, configDirName, configFileName), tc.local)
+
+			m := NewManagerWithHomeAndDir(home, root)
+			got, err := m.Resolve(Source{Flags: tc.flags})
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			tc.check(t, got)
+		})
+	}
+}
+
+// TestResolveLocalLayerInheritsUnsetValuesFromGlobal pins that the layers merge
+// per value rather than the local file wholly replacing the global one. Without
+// this, every workspace-local file would have to restate the GitHub identity and
+// anything else shared across workspaces.
+func TestResolveLocalLayerInheritsUnsetValuesFromGlobal(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+
+	writeConfigFile(t, filepath.Join(home, configDirName, configFileName), fileConfig{
+		GitHubUser:  "octocat",
+		RepoPrefix:  "global-",
+		Concurrency: 2,
+	})
+	// The local file overrides only the prefix.
+	writeConfigFile(t, filepath.Join(root, configDirName, configFileName), fileConfig{
+		RepoPrefix: "local-",
+	})
+
+	got, err := NewManagerWithHomeAndDir(home, root).Resolve(Source{})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got.GitHubUser != "octocat" {
+		t.Errorf("GitHubUser = %q, want %q inherited from the global file", got.GitHubUser, "octocat")
+	}
+	if got.Concurrency != 2 {
+		t.Errorf("Concurrency = %d, want %d inherited from the global file", got.Concurrency, 2)
+	}
+	if got.RepoPrefix != "local-" {
+		t.Errorf("RepoPrefix = %q, want %q from the local file", got.RepoPrefix, "local-")
+	}
+}
+
+// TestResolveWorkspaceRootFromLocalConfigLocation is the crux of per-workspace
+// configuration: a local file with no workspace_root still redirects commands to
+// its own tree, outranking a root the global file names. Otherwise a second
+// workspace could never be reached without passing --workspace-root every time.
+func TestResolveWorkspaceRootFromLocalConfigLocation(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	const globalRoot = "/tmp/global/root"
+
+	writeConfigFile(t, filepath.Join(home, configDirName, configFileName), fileConfig{
+		GitHubUser:    "octocat",
+		WorkspaceRoot: globalRoot,
+	})
+	writeConfigFile(t, filepath.Join(root, configDirName, configFileName), fileConfig{})
+
+	// From the workspace root and from deep inside it, the answer is the same.
+	deep := filepath.Join(root, "s3-controller", "pkg")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	for _, dir := range []string{root, deep} {
+		got, err := NewManagerWithHomeAndDir(home, dir).Resolve(Source{})
+		if err != nil {
+			t.Fatalf("Resolve() from %q error = %v", dir, err)
+		}
+		if got.WorkspaceRoot != root {
+			t.Errorf("WorkspaceRoot from %q = %q, want %q", dir, got.WorkspaceRoot, root)
+		}
+	}
+}
+
+// TestResolveWorkspaceRootPrecedenceWithinLocalLayer pins the rest of the
+// workspace-root chain: an explicit value in the local file beats the location it
+// was found at, and a flag beats everything.
+func TestResolveWorkspaceRootPrecedenceWithinLocalLayer(t *testing.T) {
+	const explicitRoot = "/tmp/explicit/root"
+	const flagRoot = "/tmp/flag/root"
+
+	home := t.TempDir()
+	root := t.TempDir()
+	writeConfigFile(t, filepath.Join(home, configDirName, configFileName), fileConfig{WorkspaceRoot: "/tmp/global/root"})
+	writeConfigFile(t, filepath.Join(root, configDirName, configFileName), fileConfig{WorkspaceRoot: explicitRoot})
+
+	m := NewManagerWithHomeAndDir(home, root)
+
+	got, err := m.Resolve(Source{})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got.WorkspaceRoot != explicitRoot {
+		t.Errorf("WorkspaceRoot = %q, want the local file's explicit %q", got.WorkspaceRoot, explicitRoot)
+	}
+
+	got, err = m.Resolve(Source{Flags: map[string]string{FlagWorkspaceRoot: flagRoot}})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got.WorkspaceRoot != flagRoot {
+		t.Errorf("WorkspaceRoot = %q, want the flag's %q", got.WorkspaceRoot, flagRoot)
+	}
+}
+
+// TestResolveRecordsLocalConfigPath pins that the resolved configuration names the
+// local file when one is in effect. internal/prereq echoes this path when it
+// reports a missing identity, so pointing at the global file here would send the
+// contributor to edit the wrong one.
+func TestResolveRecordsLocalConfigPath(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	localPath := filepath.Join(root, configDirName, configFileName)
+	writeConfigFile(t, localPath, fileConfig{RepoPrefix: "local-"})
+
+	got, err := NewManagerWithHomeAndDir(home, root).Resolve(Source{})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got.Path != localPath {
+		t.Errorf("Path = %q, want %q", got.Path, localPath)
+	}
+}
+
+// TestResolveUnparsableLocalFileError asserts that a malformed workspace-local
+// file yields a *ParseError naming that file rather than the global one.
+func TestResolveUnparsableLocalFileError(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	localPath := filepath.Join(root, configDirName, configFileName)
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(localPath, []byte("this is = not [valid toml"), 0o644); err != nil {
+		t.Fatalf("setup: writing malformed config: %v", err)
+	}
+
+	_, err := NewManagerWithHomeAndDir(home, root).Resolve(Source{})
+	if err == nil {
+		t.Fatalf("Resolve() error = nil, want *ParseError")
+	}
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("Resolve() error = %v (%T), want *ParseError", err, err)
+	}
+	if pe.Path != localPath {
+		t.Errorf("ParseError.Path = %q, want the local file %q", pe.Path, localPath)
+	}
+}

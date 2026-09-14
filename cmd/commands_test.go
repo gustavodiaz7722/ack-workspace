@@ -164,14 +164,20 @@ func fakeDeps(chk prereq.Checker, rec *recorder) deps {
 	}
 }
 
-// isolateEnv points $HOME at a temporary directory and clears the
+// isolateEnv points $HOME at a temporary directory, moves into it, and clears the
 // identity/token environment variables so configuration resolution is
 // deterministic and never reads a real config file. It returns the temporary
 // home.
+//
+// The working directory has to be isolated alongside $HOME because configuration
+// resolution walks up from it looking for a workspace-local config file. Left in
+// the package directory, a test would discover whatever config happens to sit
+// above the checkout.
 func isolateEnv(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Chdir(home)
 	t.Setenv(config.EnvGitHubUser, "")
 	t.Setenv(config.EnvToken, "")
 	// Naming GOPATH keeps configuration resolution from shelling out to

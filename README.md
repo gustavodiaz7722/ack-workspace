@@ -152,8 +152,9 @@ Settings are resolved with the following precedence, highest first:
 
 1. command-line flag
 2. environment variable (where one is defined)
-3. persisted config file (`$HOME/.ack-workspace/config`)
-4. built-in default
+3. workspace-local config file (`<workspace-root>/.ack-workspace/config`)
+4. global config file (`$HOME/.ack-workspace/config`)
+5. built-in default
 
 | Setting          | Flag                | Env            | Default                                                  |
 |------------------|---------------------|----------------|----------------------------------------------------------|
@@ -169,9 +170,49 @@ Save your settings once so you don't repeat them:
 ```bash
 export GITHUB_TOKEN=ghp_xxx
 ack-workspace config set --github-user octocat
-ack-workspace config get      # print the resolved values
-ack-workspace config path     # print the config file path
+ack-workspace config get      # print the resolved values and the file they came from
+ack-workspace config path     # print the config file in effect here
 ```
+
+### Multiple workspaces
+
+The two layers are what let more than one workspace coexist. The global file holds
+what every workspace shares — your identity, usually — and a workspace-local file
+overrides it for work anywhere inside that tree. Commands run from any directory
+under a workspace pick its configuration up automatically, with no `--workspace-root`
+on the command line.
+
+Create one with `config set --local`, from the workspace root:
+
+```bash
+cd ~/ack-workspace
+ack-workspace config set --local --prefix ack-ws- --concurrency 8
+```
+
+That writes `~/ack-workspace/.ack-workspace/config`. From then on, anywhere inside
+that tree:
+
+```bash
+cd ~/ack-workspace/s3-controller
+ack-workspace config get
+# workspace-root: /home/you/ack-workspace
+# config-file:    /home/you/ack-workspace/.ack-workspace/config (workspace-local)
+```
+
+A few details worth knowing:
+
+- **The file's location is the workspace root.** A local file needs no
+  `workspace_root` key, and `config set --local` deliberately leaves it out, so the
+  workspace keeps working if you move or rename the directory. Set `workspace_root`
+  explicitly only when the config has to describe a tree it does not live in.
+- **The layers merge per value, not wholesale.** A local file that sets only
+  `repo_prefix` still inherits `github_user` from the global file.
+- **The local file's location outranks the global file's `workspace_root`.** Standing
+  inside a workspace is the stronger signal, which is what makes a second workspace
+  reachable without flags.
+- **The nearest file wins** when directories nest, and `$HOME/.ack-workspace/config`
+  is always the global layer — it is never treated as workspace-local, so running
+  from `$HOME` does not make `$HOME` your workspace root.
 
 ## Usage
 
