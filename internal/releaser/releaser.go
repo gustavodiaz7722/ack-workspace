@@ -16,6 +16,23 @@
 // has diverged from upstream is reported as a failure rather than
 // force-updated, and in dry-run mode it reports the steps it would take and
 // touches nothing.
+//
+// # Why the environment overrides are required
+//
+// build-controller-release.sh locates two of its inputs relative to a workspace
+// root it assumes is named "aws-controllers-k8s": it defaults both
+// ACK_GENERATE_BIN_PATH and TEMPLATES_DIR to
+// "<code-generator>/../../aws-controllers-k8s/code-generator/...". A workspace
+// rooted anywhere else therefore fails immediately with "Unable to find an
+// ack-generate binary", even though the binary exists at
+// "<root>/code-generator/bin/ack-generate". The releaser resolves both against
+// the real workspace root and exports them, exactly as the builder does for
+// `make build-controller`.
+//
+// RUNTIME_DIR is deliberately not overridden: its default,
+// "<code-generator>/../runtime", already resolves to "<root>/runtime" under any
+// workspace root, so setting it would add a redundant override that could drift
+// from the script's own default.
 package releaser
 
 import (
@@ -55,6 +72,19 @@ const (
 	// to learn which version it is generating.
 	releaseVersionEnv = "RELEASE_VERSION"
 
+	// The following are the environment-variable names build-controller-release.sh
+	// reads to locate the code-generator's own artifacts. The releaser sets each
+	// one so the script resolves against the real workspace root rather than a
+	// path that assumes the root is named "aws-controllers-k8s" (see the package
+	// doc).
+
+	// envAckGenerateBinPath points the release script at the compiled ack-generate
+	// binary.
+	envAckGenerateBinPath = "ACK_GENERATE_BIN_PATH"
+	// envTemplatesDir points the release script at the code-generator templates
+	// directory.
+	envTemplatesDir = "TEMPLATES_DIR"
+
 	upstreamRemote = "upstream"
 	originRemote   = "origin"
 )
@@ -77,8 +107,9 @@ func (e *UsageError) Error() string { return e.Msg }
 // code-generator.
 type ScriptRunner interface {
 	// Run executes the release build script for service in codegenDir (the
-	// code-generator directory), with RELEASE_VERSION set to version.
-	Run(ctx context.Context, codegenDir, service, version string) error
+	// code-generator directory), with RELEASE_VERSION set to version and env (a
+	// list of "KEY=VALUE" entries) appended to the inherited process environment.
+	Run(ctx context.Context, codegenDir, service, version string, env []string) error
 }
 
 // Options controls release behavior.
@@ -172,9 +203,14 @@ func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base
 
 	repo := git.NewRepo(controllerPath, ap.Git)
 
+	// The environment overrides that make the release script resolve the
+	// code-generator's binary and templates against the real workspace root (see
+	// the package doc).
+	env := releaseEnv(root)
+
 	// Dry-run: report the steps that would be taken without mutating anything.
 	if ap.DryRun {
-		return r.preview(name, branch, base, version, opts)
+		return r.preview(name, branch, base, version, env, opts)
 	}
 
 	// Safety: never run a release on top of uncommitted local work, which could be
@@ -220,7 +256,7 @@ func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base
 	}
 
 	// 3. Regenerate the release artifacts via the code-generator script.
-	if err := r.script.Run(ctx, codegenPath, alias, version); err != nil {
+	if err := r.script.Run(ctx, codegenPath, alias, version, env); err != nil {
 		return failed(name, fmt.Errorf("generating release artifacts: %w", err))
 	}
 
@@ -280,14 +316,25 @@ func defaultPRBody(name, version string) string {
 }
 
 // preview computes the release steps for a dry-run without mutating anything.
-func (r *Releaser) preview(name, branch, base, version string, opts Options) workspace.Result {
+func (r *Releaser) preview(name, branch, base, version string, env []string, opts Options) workspace.Result {
 	reason := fmt.Sprintf(
-		"would update %q from upstream, create branch %q, run %s, commit %q, and push to %s",
-		base, branch, releaseScript, commitMessage(version), originRemote)
+		"would update %q from upstream, create branch %q, run %s with %s, commit %q, and push to %s",
+		base, branch, releaseScript, strings.Join(env, " "), commitMessage(version), originRemote)
 	if !opts.SkipPR {
 		reason += fmt.Sprintf("; then open a PR to %s/%s", upstreamOwner, name)
 	}
 	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
+}
+
+// releaseEnv assembles the "KEY=VALUE" environment overrides
+// build-controller-release.sh needs when the workspace root is not literally
+// ".../aws-controllers-k8s". RELEASE_VERSION is added by the runner, so it is
+// not included here.
+func releaseEnv(root string) []string {
+	return []string{
+		envAckGenerateBinPath + "=" + filepath.Join(root, codegenDirName, "bin", "ack-generate"),
+		envTemplatesDir + "=" + filepath.Join(root, codegenDirName, "templates"),
+	}
 }
 
 // commitMessage builds the conventional release commit/PR title for version.
@@ -316,12 +363,12 @@ func normalizeVersion(v string) (string, error) {
 type execScriptRunner struct{}
 
 // Run executes `./scripts/build-controller-release.sh <service>` in codegenDir
-// with RELEASE_VERSION=<version> added to the inherited environment. On failure
-// it surfaces any script output to aid debugging.
-func (execScriptRunner) Run(ctx context.Context, codegenDir, service, version string) error {
+// with RELEASE_VERSION=<version> and env added to the inherited environment. On
+// failure it surfaces any script output to aid debugging.
+func (execScriptRunner) Run(ctx context.Context, codegenDir, service, version string, env []string) error {
 	cmd := exec.CommandContext(ctx, releaseScript, service)
 	cmd.Dir = codegenDir
-	cmd.Env = append(os.Environ(), releaseVersionEnv+"="+version)
+	cmd.Env = append(append(os.Environ(), releaseVersionEnv+"="+version), env...)
 
 	var combined bytes.Buffer
 	cmd.Stdout = &combined

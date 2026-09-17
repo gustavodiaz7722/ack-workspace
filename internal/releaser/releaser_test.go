@@ -23,15 +23,17 @@ type fakeScript struct {
 	gotDir     string
 	gotService string
 	gotVersion string
+	gotEnv     []string
 	err        error
 	onRun      func()
 }
 
-func (f *fakeScript) Run(_ context.Context, dir, service, version string) error {
+func (f *fakeScript) Run(_ context.Context, dir, service, version string, env []string) error {
 	f.called = true
 	f.gotDir = dir
 	f.gotService = service
 	f.gotVersion = version
+	f.gotEnv = env
 	if f.onRun != nil {
 		f.onRun()
 	}
@@ -131,6 +133,14 @@ func TestRelease_HappyPathPushesAndOpensPR(t *testing.T) {
 	if script.gotDir != filepath.Join(root, codegenDirName) {
 		t.Errorf("script dir = %q, want %q", script.gotDir, filepath.Join(root, codegenDirName))
 	}
+
+	// The script's own defaults for these two assume the workspace root is named
+	// "aws-controllers-k8s"; without the overrides it aborts with "Unable to find
+	// an ack-generate binary".
+	assertEnv(t, script.gotEnv, "ACK_GENERATE_BIN_PATH",
+		filepath.Join(root, codegenDirName, "bin", "ack-generate"))
+	assertEnv(t, script.gotEnv, "TEMPLATES_DIR",
+		filepath.Join(root, codegenDirName, "templates"))
 
 	// The expected git commands were issued.
 	assertGitCall(t, mr, []string{"fetch", "upstream"})
@@ -494,4 +504,62 @@ func equalArgs(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// assertEnv fails the test unless env carries exactly one "key=want" entry.
+func assertEnv(t *testing.T, env []string, key, want string) {
+	t.Helper()
+	prefix := key + "="
+	var found []string
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			found = append(found, strings.TrimPrefix(e, prefix))
+		}
+	}
+	switch len(found) {
+	case 0:
+		t.Errorf("%s not set; env = %v", key, env)
+	case 1:
+		if found[0] != want {
+			t.Errorf("%s = %q, want %q", key, found[0], want)
+		}
+	default:
+		t.Errorf("%s set %d times (%v), want once", key, len(found), found)
+	}
+}
+
+// TestExecScriptRunner_ExportsVersionAndOverrides exercises the production
+// runner against a stub script that records its environment, which is where the
+// overrides have to arrive: the script aborts with "Unable to find an
+// ack-generate binary" when it falls back to its own ACK_GENERATE_BIN_PATH
+// default.
+func TestExecScriptRunner_ExportsVersionAndOverrides(t *testing.T) {
+	codegenDir := t.TempDir()
+	mustMkdir(t, filepath.Join(codegenDir, "scripts"))
+	envFile := filepath.Join(codegenDir, "env.txt")
+	stub := "#!/usr/bin/env bash\nprintf '%s\\n' \"$RELEASE_VERSION\" \"$ACK_GENERATE_BIN_PATH\" \"$TEMPLATES_DIR\" \"$1\" > " + envFile + "\n"
+	scriptPath := filepath.Join(codegenDir, "scripts", "build-controller-release.sh")
+	if err := os.WriteFile(scriptPath, []byte(stub), 0o755); err != nil {
+		t.Fatalf("writing stub script: %v", err)
+	}
+
+	env := releaseEnv("/ws")
+	if err := (execScriptRunner{}).Run(context.Background(), codegenDir, "ecr", "v1.0.1", env); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("reading recorded env: %v", err)
+	}
+	got := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	want := []string{
+		"v1.0.1",
+		filepath.Join("/ws", codegenDirName, "bin", "ack-generate"),
+		filepath.Join("/ws", codegenDirName, "templates"),
+		"ecr",
+	}
+	if !equalArgs(got, want) {
+		t.Errorf("script saw %v, want %v", got, want)
+	}
 }
