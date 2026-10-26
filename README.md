@@ -125,7 +125,10 @@ would otherwise surface as a confusing failure from inside `make`.
 
 ⁵ `eksctl` is required even though `deploy` only uses it when the development cluster has to
 be created: learning you cannot create one is worth knowing before a 20-minute image build,
-not after.
+not after. The `aws` that resolves first on your `PATH` must also be recent enough to write the
+`client.authentication.k8s.io/v1beta1` exec credential API into the kubeconfig. AWS CLI v2 is;
+old v1 releases (1.18, for one) write `v1alpha1`, which kubectl 1.24 removed. `deploy` reads
+the entry back after writing it and stops, naming the `aws` it ran, before building anything.
 
 ⁶ `test` needs `git` because the suites pin the `acktest` library as a git URL, which `pip`
 resolves by cloning it; `python3` builds the virtual environment the suite then runs from.

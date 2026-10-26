@@ -18,6 +18,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -305,6 +306,133 @@ func TestPodIdentityRoleName(t *testing.T) {
 func TestClusterNameIsFixed(t *testing.T) {
 	if ClusterName != "ack-dev-auto" {
 		t.Errorf("ClusterName = %q, want ack-dev-auto", ClusterName)
+	}
+}
+
+// --- kubeconfig exec API check ---------------------------------------------
+
+// TestClassifyKubeconfigExecAPI pins which read-back values stop a deploy. Only
+// the removed v1alpha1 API does; v1beta1, v1, and an entry with no exec plugin
+// at all are left to kubectl. The CLI is described only when there is a
+// failure to explain.
+func TestClassifyKubeconfigExecAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		apiVersion string
+		wantErr    bool
+	}{
+		{name: "removed v1alpha1", apiVersion: "client.authentication.k8s.io/v1alpha1", wantErr: true},
+		{name: "v1alpha1 with trailing newline", apiVersion: "client.authentication.k8s.io/v1alpha1\n", wantErr: true},
+		{name: "supported v1beta1", apiVersion: "client.authentication.k8s.io/v1beta1"},
+		{name: "supported v1", apiVersion: "client.authentication.k8s.io/v1"},
+		{name: "no exec plugin", apiVersion: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			described := false
+			err := classifyKubeconfigExecAPI(tc.apiVersion, func() (string, string) {
+				described = true
+				return "/usr/bin/aws", "aws-cli/1.18.147"
+			})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error: %v", err, tc.wantErr)
+			}
+			if described != tc.wantErr {
+				t.Errorf("CLI described = %v, want %v (only to explain a failure)", described, tc.wantErr)
+			}
+			if !tc.wantErr {
+				return
+			}
+			// The error has to name the cause and the fix, since kubectl's own
+			// message names neither.
+			for _, want := range []string{"v1alpha1", "/usr/bin/aws", "aws-cli/1.18.147", "AWS CLI v2", "which -a aws"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestStaleExecPluginError_WithoutCLIDetails covers the best-effort path: when
+// the aws executable cannot be described, the error still reads cleanly and
+// still says what to do.
+func TestStaleExecPluginError_WithoutCLIDetails(t *testing.T) {
+	msg := staleExecPluginError(staleExecAPIVersion, "", "").Error()
+	if !strings.Contains(msg, "the `aws` executable on your PATH is too old") {
+		t.Errorf("error %q, want it to name the PATH executable without empty placeholders", msg)
+	}
+	if strings.Contains(msg, "()") || strings.Contains(msg, ", ,") {
+		t.Errorf("error %q contains an empty placeholder", msg)
+	}
+}
+
+// writeFakeTool writes an executable shell script named name into dir.
+func writeFakeTool(t *testing.T, dir, name, script string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatalf("writing fake %s: %v", name, err)
+	}
+}
+
+// TestExecUpdateKubeconfig_ReadsBackExecAPI drives the real UpdateKubeconfig
+// against fake aws and kubectl executables, so the read-back command and its
+// wiring are exercised end to end: an old CLI's v1alpha1 entry fails the deploy
+// with the CLI named, a current entry passes, and a read-back that cannot run
+// is not itself a failure.
+func TestExecUpdateKubeconfig_ReadsBackExecAPI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake tools are shell scripts")
+	}
+	for _, tc := range []struct {
+		name    string
+		kubectl string
+		wantErr bool
+	}{
+		{
+			name:    "old CLI wrote v1alpha1",
+			kubectl: `echo "client.authentication.k8s.io/v1alpha1"`,
+			wantErr: true,
+		},
+		{
+			name:    "current CLI wrote v1beta1",
+			kubectl: `echo "client.authentication.k8s.io/v1beta1"`,
+		},
+		{
+			name:    "read-back fails",
+			kubectl: `echo "error: unable to read config" >&2; exit 1`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// AWS CLI v1 prints its version to stderr; update-kubeconfig succeeds.
+			writeFakeTool(t, dir, "aws", `if [ "$1" = "--version" ]; then echo "aws-cli/1.18.147 Python/2.7.18" >&2; fi
+exit 0
+`)
+			// The fake only answers the exact read-back the code issues, so a change
+			// to that command shows up here as a failure to detect v1alpha1.
+			writeFakeTool(t, dir, "kubectl", `if [ "$*" = "config view --minify -o jsonpath={.users[0].user.exec.apiVersion}" ]; then
+`+tc.kubectl+`
+else
+  echo "unexpected kubectl args: $*" >&2; exit 2
+fi
+`)
+			t.Setenv("PATH", dir)
+
+			err := execProvisioner{}.UpdateKubeconfig(context.Background(), ClusterName, "us-west-2")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error: %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				for _, want := range []string{filepath.Join(dir, "aws"), "aws-cli/1.18.147"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not name %q", err, want)
+					}
+				}
+				if strings.Contains(err.Error(), "Python") {
+					t.Errorf("error %q should carry only the first field of `aws --version`", err)
+				}
+			}
+		})
 	}
 }
 

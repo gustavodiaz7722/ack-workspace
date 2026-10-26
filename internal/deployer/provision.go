@@ -70,6 +70,12 @@ const (
 	// cluster creation.
 	notFoundException = "ResourceNotFoundException"
 	notFoundMessage   = "No cluster found"
+
+	// staleExecAPIVersion is the exec credential plugin API that old AWS CLI
+	// releases (1.18, for one) write into the kubeconfig. kubectl 1.24 removed it,
+	// so every kubectl and helm call against such an entry fails, with an error
+	// that names neither the AWS CLI nor the kubeconfig as the cause.
+	staleExecAPIVersion = "client.authentication.k8s.io/v1alpha1"
 )
 
 // autoModeNodePools are the EKS Auto Mode node pools enabled on a bootstrapped
@@ -293,12 +299,77 @@ func (execProvisioner) CreateCluster(ctx context.Context, spec ClusterSpec) erro
 // runs on every deploy to a named cluster, not just after creation, so the
 // deploy targets the cluster the caller asked for regardless of which context
 // happened to be selected.
+//
+// It then reads back the exec credential plugin API version of the entry it
+// just wrote. An AWS CLI old enough to write the removed v1alpha1 API exits
+// successfully, and the deploy would otherwise fail at its first kubectl call
+// with an error that points nowhere near the cause. Rewriting the entry would
+// not help either: that CLI's `aws eks get-token` emits v1alpha1 credentials
+// too, so the only fix is a newer CLI, which the error says.
 func (execProvisioner) UpdateKubeconfig(ctx context.Context, name, region string) error {
 	cmd := exec.CommandContext(ctx, "aws", "eks", "update-kubeconfig", "--name", name, "--region", region)
 	if out, err := runCombined(cmd); err != nil {
 		return annotate(fmt.Sprintf("aws eks update-kubeconfig --name %s", name), out, err)
 	}
-	return nil
+
+	// --minify limits the view to the current context, which update-kubeconfig
+	// has just selected. Reading the config never runs the exec plugin, so this
+	// works even when the entry is unusable. The read-back is diagnostic only: if
+	// it fails, the next kubectl step reports the underlying problem itself.
+	view := exec.CommandContext(ctx, "kubectl", "config", "view", "--minify",
+		"-o", "jsonpath={.users[0].user.exec.apiVersion}")
+	out, err := runCombined(view)
+	if err != nil {
+		return nil
+	}
+	return classifyKubeconfigExecAPI(out, func() (string, string) { return describeAWSCLI(ctx) })
+}
+
+// classifyKubeconfigExecAPI decides whether the exec credential API version read
+// back from the kubeconfig is usable. Only the removed v1alpha1 API is an error;
+// any other value, including none at all (an entry that authenticates without
+// an exec plugin), is left to kubectl. describeCLI is called only to explain a
+// failure, so the common path runs nothing extra.
+func classifyKubeconfigExecAPI(apiVersion string, describeCLI func() (path, version string)) error {
+	apiVersion = strings.TrimSpace(apiVersion)
+	if apiVersion != staleExecAPIVersion {
+		return nil
+	}
+	awsPath, awsVersion := describeCLI()
+	return staleExecPluginError(apiVersion, awsPath, awsVersion)
+}
+
+// staleExecPluginError explains a kubeconfig entry written with the removed
+// v1alpha1 exec credential API: which aws executable wrote it, and what to do.
+// awsPath and awsVersion are best-effort and may be empty.
+func staleExecPluginError(apiVersion, awsPath, awsVersion string) error {
+	cli := "the `aws` executable on your PATH"
+	if awsPath != "" {
+		cli = fmt.Sprintf("the `aws` executable on your PATH (%s)", awsPath)
+	}
+	if awsVersion != "" {
+		cli += ", " + awsVersion + ","
+	}
+	return fmt.Errorf(
+		"aws eks update-kubeconfig wrote a kubeconfig entry using exec credential API %s, "+
+			"which kubectl 1.24 and later reject; %s is too old to manage EKS credentials: "+
+			"put AWS CLI v2 ahead of it on your PATH (`which -a aws` lists the candidates) and re-run deploy, "+
+			"which rewrites the entry, so the kubeconfig needs no manual edit",
+		apiVersion, cli)
+}
+
+// describeAWSCLI reports the resolved path and version of the aws executable
+// for diagnostics, the version trimmed to its first field (for example
+// "aws-cli/1.18.147"). Either value is empty when it cannot be determined; a
+// failure here never masks the error being explained.
+func describeAWSCLI(ctx context.Context) (path, version string) {
+	path, _ = exec.LookPath("aws")
+	// AWS CLI v1 prints its version to stderr, so read the combined output.
+	out, err := runCombined(exec.CommandContext(ctx, "aws", "--version"))
+	if fields := strings.Fields(out); err == nil && len(fields) > 0 {
+		version = fields[0]
+	}
+	return path, version
 }
 
 // EnsureServiceAccount creates the namespace and service account when they are
