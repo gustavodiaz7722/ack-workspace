@@ -251,11 +251,48 @@ func TestBuild_DetachedHeadReported(t *testing.T) {
 	if res.Outcome != workspace.OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want created", res.Outcome)
 	}
-	if !strings.Contains(res.Reason, "detached HEAD") {
+	if !strings.Contains(res.Reason, "from detached HEAD") {
 		t.Errorf("reason = %q, want it to note the detached HEAD", res.Reason)
+	}
+	// "branch" belongs to a named branch only; a detached HEAD is not one.
+	if strings.Contains(res.Reason, "branch detached") {
+		t.Errorf("reason = %q, want no %q label on a detached HEAD", res.Reason, "branch")
 	}
 	if !maker.called {
 		t.Error("a detached HEAD must not prevent the build")
+	}
+}
+
+// TestBuild_DryRunNamesBranchAndDetachedHead pins the preview wording for both
+// checked-out states, so a named branch reads "against branch <name>" and a
+// detached HEAD reads "against detached HEAD" rather than "against branch
+// detached HEAD".
+func TestBuild_DryRunNamesBranchAndDetachedHead(t *testing.T) {
+	detached := &git.MockRunner{ResponseFunc: func(_ string, args []string) (string, error) {
+		if len(args) > 0 && args[0] == "symbolic-ref" {
+			return "", &git.ExitError{Code: 1}
+		}
+		return "", nil
+	}}
+	for _, tc := range []struct {
+		name   string
+		runner git.Runner
+		want   string
+	}{
+		{name: "named branch", runner: branchRunner("pr-110"), want: "against branch pr-110 "},
+		{name: "detached HEAD", runner: detached, want: "against detached HEAD "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := workspaceWithController(t, "ecr-controller")
+			summary, err := NewWithMakeRunner(&fakeMaker{}).Build(
+				context.Background(), appWith(root, tc.runner, true), "ecr", Options{})
+			if err != nil {
+				t.Fatalf("Build returned error: %v", err)
+			}
+			if res := only(t, summary); !strings.Contains(res.Reason, tc.want) {
+				t.Errorf("preview = %q, want it to contain %q", res.Reason, tc.want)
+			}
+		})
 	}
 }
 

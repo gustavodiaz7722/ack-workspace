@@ -181,14 +181,14 @@ func (b *Builder) process(ctx context.Context, ap app.App, alias string, opts Op
 	}
 
 	return built(name, fmt.Sprintf(
-		"built %s from branch %s with `make %s SERVICE=%s`",
+		"built %s from %s with `make %s SERVICE=%s`",
 		name, branch, makeTarget, alias))
 }
 
 // describeBranch returns a human-readable label for the controller's
 // checked-out state ("branch <name>", "detached HEAD", or "unknown branch" when
-// it cannot be determined). It never fails the build: the branch is reported
-// for context only.
+// it cannot be determined), worded to follow "from" or "against" in a report.
+// It never fails the build: the branch is reported for context only.
 func (b *Builder) describeBranch(ctx context.Context, controllerPath string, runner git.Runner) string {
 	repo := git.NewRepo(controllerPath, runner)
 	name, detached, err := repo.CurrentBranch(ctx)
@@ -198,14 +198,14 @@ func (b *Builder) describeBranch(ctx context.Context, controllerPath string, run
 	case detached:
 		return "detached HEAD"
 	default:
-		return name
+		return "branch " + name
 	}
 }
 
 // preview computes the build step for a dry-run without executing anything.
 func (b *Builder) preview(name, alias, branch, codegenPath string, env []string) workspace.Result {
 	reason := fmt.Sprintf(
-		"would run `make %s SERVICE=%s` in %s against branch %s with %s",
+		"would run `make %s SERVICE=%s` in %s against %s with %s",
 		makeTarget, alias, codegenPath, branch, strings.Join(env, " "))
 	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
 }
