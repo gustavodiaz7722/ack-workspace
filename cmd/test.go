@@ -15,7 +15,8 @@ const (
 	flagMethods = "methods"
 	// flagThreads sets the pytest-xdist worker count.
 	flagThreads = "threads"
-	// flagLogLevel sets the pytest log level.
+	// flagLogLevel sets a log level: pytest's for test, the deployed
+	// controller's for deploy.
 	flagLogLevel = "log-level"
 	// flagSkipCleanup leaves the suite's AWS fixtures in place after the run.
 	flagSkipCleanup = "skip-cleanup"

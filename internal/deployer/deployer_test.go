@@ -204,6 +204,81 @@ func TestHelmUpgradeArgs_NoResyncPeriodWhenUnset(t *testing.T) {
 	}
 }
 
+// TestHelmUpgradeArgs_LogLevelUsesSetString pins the log level override and its
+// coercion: the chart's values schema types log.level as a string.
+func TestHelmUpgradeArgs_LogLevelUsesSetString(t *testing.T) {
+	args := helmUpgradeArgs(DeployParams{
+		ChartDir:  "/charts/ecr",
+		Namespace: "ack-system",
+		Release:   "ack-ecr-controller",
+		ImageRepo: "repo/ecr-controller",
+		ImageTag:  "dev",
+		Region:    "us-west-2",
+		LogLevel:  "debug",
+	})
+
+	if got := setFlagFor(args, "log.level=debug"); got != "--set-string" {
+		t.Errorf("log.level should be passed with --set-string, got %q in %v", got, args)
+	}
+}
+
+// An unset level must leave the chart's own default alone rather than pin info
+// explicitly, so a chart that changes its default is followed.
+func TestHelmUpgradeArgs_NoLogLevelWhenUnset(t *testing.T) {
+	args := helmUpgradeArgs(DeployParams{
+		ChartDir:  "/charts/ecr",
+		Namespace: "ack-system",
+		Release:   "ack-ecr-controller",
+		ImageRepo: "repo/ecr-controller",
+		ImageTag:  "dev",
+		Region:    "us-west-2",
+	})
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "log.level") {
+			t.Errorf("expected no log level override when LogLevel is empty, got %v", args)
+		}
+	}
+}
+
+// TestNormalizeLogLevel pins the accepted set and the normalization. Every
+// rejection matters: the runtime would silently log at info for any of them.
+func TestNormalizeLogLevel(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: ""},
+		{in: "  ", want: ""},
+		{in: "debug", want: "debug"},
+		{in: "info", want: "info"},
+		{in: "warn", want: "warn"},
+		{in: "error", want: "error"},
+		{in: " DEBUG ", want: "debug"},
+		{in: "verbose", wantErr: true},
+		{in: "warning", wantErr: true},
+		{in: "trace", wantErr: true},
+		{in: "panic", wantErr: true},
+		{in: "1", wantErr: true},
+	} {
+		got, err := normalizeLogLevel(tc.in)
+		if tc.wantErr {
+			var ue *UsageError
+			if !errors.As(err, &ue) {
+				t.Errorf("normalizeLogLevel(%q) error = %v (%T), want *UsageError", tc.in, err, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("normalizeLogLevel(%q) returned error: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Errorf("normalizeLogLevel(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestExecRegistryImageExists_ClassifiesFailures pins the distinction the reuse
 // decision rests on: `aws ecr describe-images` exits non-zero both when the tag
 // is genuinely absent and when the lookup itself broke, and collapsing the

@@ -1066,6 +1066,49 @@ func TestDeploy_NegativeResyncPeriodSurfacesUsageError(t *testing.T) {
 	}
 }
 
+func TestDeploy_ParsesLogLevel(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"deploy", "ecr", "--"+flagLogLevel, "debug")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !rec.deployCalled {
+		t.Fatal("deploy should delegate to deployRun")
+	}
+	if rec.deployOpts.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want %q", rec.deployOpts.LogLevel, "debug")
+	}
+}
+
+// An unset --log-level must reach the deployer empty, which is what tells it to
+// leave the chart's own default in place.
+func TestDeploy_LogLevelDefaultsToChartValue(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec), "deploy", "ecr")
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if rec.deployOpts.LogLevel != "" {
+		t.Errorf("LogLevel = %q, want empty (chart default)", rec.deployOpts.LogLevel)
+	}
+}
+
+// An unknown level is rejected by the deployer as a usage error, which the
+// command surfaces unchanged so it maps to the usage exit code.
+func TestDeploy_UnknownLogLevelSurfacesUsageError(t *testing.T) {
+	isolateEnv(t)
+	rec := &recorder{runErr: &deployer.UsageError{Msg: `log level must be one of debug, info, warn, error, got "verbose"`}}
+	_, _, err := runCmd(t, fakeDeps(&fakeChecker{}, rec),
+		"deploy", "ecr", "--"+flagLogLevel, "verbose")
+	var ue *deployer.UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("error = %v (%T), want *deployer.UsageError", err, err)
+	}
+}
+
 // --- candidates command ------------------------------------------------------
 
 // Defaults: with no argument and no flags the command indexes every resource of

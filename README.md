@@ -414,7 +414,12 @@ The service may be a bare alias (`ecr`) or its full form (`ecr-controller`). Use
 ack-workspace deploy ecr --dry-run                     # preview every step; changes nothing
 ack-workspace deploy ecr --region us-west-2            # target a specific region
 ack-workspace deploy ecr --resync-period 60            # resync every 60s instead of the chart's 10h
+ack-workspace deploy ecr --log-level debug             # log every reconcile step and requeue
 ```
+
+Both overrides are applied on every deploy and reset by any deploy that omits them, because
+`deploy` installs the chart with its default values. A level outside `debug`, `info`, `warn`
+and `error` is refused: the controller would otherwise silently fall back to `info`.
 
 #### A controller always lands in the same place
 

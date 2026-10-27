@@ -143,6 +143,47 @@ type Options struct {
 	// beforehand is discarded, and one applied afterwards costs a second rollout
 	// and is easy to forget.
 	ResyncPeriod int
+	// LogLevel is the controller's log level, set on the chart as log.level. It
+	// must be one of ControllerLogLevels, compared case-insensitively. Empty
+	// leaves the chart's own default (info) in place, and anything else is a
+	// usage error.
+	//
+	// debug is the level that makes a reconcile legible: the runtime logs every
+	// rm.ReadOne/sdkFind entry and exit, and each requeue with its delay and
+	// reason, only at debug. It belongs on the deploy for the same reason as
+	// ResyncPeriod — the install resets every chart value to its default, so a
+	// level raised with a separate `helm upgrade` is lost on the next deploy and
+	// costs a second rollout each time.
+	LogLevel string
+}
+
+// ControllerLogLevels are the log levels deploy accepts for the controller.
+// They are the zap levels the ACK runtime actually logs at; zap also parses
+// dpanic, panic and fatal, but at those levels the controller is all but
+// silent, which no development deploy wants.
+var ControllerLogLevels = []string{"debug", "info", "warn", "error"}
+
+// normalizeLogLevel trims and lowercases level and checks it against
+// ControllerLogLevels, returning "" when level is blank so the chart default
+// stands.
+//
+// This is the only place an unknown level can be caught. The runtime discards
+// the parse error (config.SetupLogger ignores the result of
+// zapcore.Level.UnmarshalText) and falls back to info, so a typo such as
+// "verbose" would deploy successfully, log at info, and the lines the operator
+// raised the level to see would simply never appear.
+func normalizeLogLevel(level string) (string, error) {
+	l := strings.ToLower(strings.TrimSpace(level))
+	if l == "" {
+		return "", nil
+	}
+	for _, valid := range ControllerLogLevels {
+		if l == valid {
+			return l, nil
+		}
+	}
+	return "", &UsageError{Msg: fmt.Sprintf(
+		"log level must be one of %s, got %q", strings.Join(ControllerLogLevels, ", "), level)}
 }
 
 // DeployParams describes one `helm upgrade --install` of a controller chart. It
@@ -164,6 +205,9 @@ type DeployParams struct {
 	// ResyncPeriod, when positive, overrides the chart's
 	// reconcile.defaultResyncPeriod (in seconds). Zero leaves the chart default.
 	ResyncPeriod int
+	// LogLevel, when non-empty, overrides the chart's log.level. It is already
+	// normalized to one of ControllerLogLevels; empty leaves the chart default.
+	LogLevel string
 }
 
 // Deployer builds a controller and deploys it to the development cluster.
@@ -214,6 +258,11 @@ func (d *Deployer) Deploy(ctx context.Context, ap app.App, service string, opts 
 			Msg: fmt.Sprintf("resync period must be a positive number of seconds, got %d", opts.ResyncPeriod),
 		}
 	}
+	level, err := normalizeLogLevel(opts.LogLevel)
+	if err != nil {
+		return workspace.Summary{}, err
+	}
+	opts.LogLevel = level
 
 	result := d.process(ctx, ap, alias, opts)
 	return workspace.Summary{Results: []workspace.Result{result}}, nil
@@ -306,6 +355,7 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		ImageTag:     tag,
 		Region:       region,
 		ResyncPeriod: opts.ResyncPeriod,
+		LogLevel:     opts.LogLevel,
 	}
 
 	// Look up the development cluster. An inconclusive answer is a failure rather
@@ -382,8 +432,8 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 		imageNote = "deployed existing"
 	}
 	return deployed(name, fmt.Sprintf(
-		"%s %s to %s (namespace %s); %s %s",
-		imageNote, imageRef, describeCluster(clusterExisted), namespace, repoNote, repoName))
+		"%s %s to %s (namespace %s)%s; %s %s",
+		imageNote, imageRef, describeCluster(clusterExisted), namespace, describeOverrides(params), repoNote, repoName))
 }
 
 // describeCluster renders the target cluster for a human-readable outcome,
@@ -473,13 +523,6 @@ func (d *Deployer) preview(name string, clusterExists bool, imageRef string, reu
 			ClusterName, p.Region, p.Namespace, SharedServiceAccount)
 	}
 
-	// Surface the resync override in the preview: it changes how the deployed
-	// controller behaves, so a dry-run that omitted it would not reflect the run.
-	var resync string
-	if p.ResyncPeriod > 0 {
-		resync = fmt.Sprintf(" with a %ds default resync period", p.ResyncPeriod)
-	}
-
 	// Report build-or-reuse, because it is the difference between a deploy that
 	// takes minutes and one that takes seconds, and it says which artifact would
 	// actually run.
@@ -490,8 +533,28 @@ func (d *Deployer) preview(name string, clusterExists bool, imageRef string, reu
 
 	reason := fmt.Sprintf(
 		"%swould point the kubeconfig at %s, ensure ECR repository, %s, apply the chart's CRDs, and helm upgrade --install %s into namespace %s under service account %q%s",
-		bootstrap, describeCluster(clusterExists), image, p.Release, p.Namespace, SharedServiceAccount, resync)
+		bootstrap, describeCluster(clusterExists), image, p.Release, p.Namespace, SharedServiceAccount, describeOverrides(p))
 	return workspace.Result{Repo: name, Outcome: workspace.OutcomeSucceeded, Reason: reason}
+}
+
+// describeOverrides renders the chart values a deploy sets beyond the fixed
+// ones, as a clause such as " with a 60s default resync period and log level
+// debug", or "" when there are none. Both the preview and the outcome carry it:
+// each override changes how the deployed controller behaves, so a summary that
+// omitted one would not describe the controller that is running, and the
+// outcome is the only confirmation the override was actually applied.
+func describeOverrides(p DeployParams) string {
+	var overrides []string
+	if p.ResyncPeriod > 0 {
+		overrides = append(overrides, fmt.Sprintf("a %ds default resync period", p.ResyncPeriod))
+	}
+	if p.LogLevel != "" {
+		overrides = append(overrides, "log level "+p.LogLevel)
+	}
+	if len(overrides) == 0 {
+		return ""
+	}
+	return " with " + strings.Join(overrides, " and ")
 }
 
 // execBuilder is the production Builder. It invokes the code-generator image
@@ -699,6 +762,9 @@ func applyChartCRDs(ctx context.Context, chartDir string) error {
 // a number, the opposite of the tag: `--set-string` would make it a string and
 // the schema would reject it.
 //
+// A non-empty p.LogLevel overrides log.level, through `--set-string` because the
+// schema types it as a string.
+//
 // `--force-conflicts` is passed because Helm v4 applies server-side, and a
 // development cluster routinely accumulates other field managers on a
 // controller Deployment. Pointing a controller at an older image with `kubectl
@@ -727,6 +793,9 @@ func helmUpgradeArgs(p DeployParams) []string {
 		args = append(args,
 			"--set", "reconcile.defaultResyncPeriod="+strconv.Itoa(p.ResyncPeriod),
 		)
+	}
+	if p.LogLevel != "" {
+		args = append(args, "--set-string", "log.level="+p.LogLevel)
 	}
 	return args
 }

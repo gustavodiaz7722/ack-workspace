@@ -682,6 +682,121 @@ func TestDeploy_DryRunReportsResyncPeriod(t *testing.T) {
 	}
 }
 
+// TestDeploy_LogLevelReachesChartNormalized pins the whole path from the option
+// to the chart override, including normalization: the level is matched
+// case-insensitively and reaches helm in the lowercase form the chart expects.
+func TestDeploy_LogLevelReachesChartNormalized(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	d, _, _, cluster, _ := deployFixture(true)
+
+	summary, err := d.Deploy(context.Background(), appWith(root, false), "ecr", Options{LogLevel: " Debug "})
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	if res := only(t, summary); res.Outcome != workspace.OutcomeSucceeded {
+		t.Fatalf("outcome = %q, want succeeded; reason: %s", res.Outcome, res.Reason)
+	}
+	if cluster.params == nil {
+		t.Fatal("controller was not deployed")
+	}
+	if cluster.params.LogLevel != "debug" {
+		t.Errorf("DeployParams.LogLevel = %q, want %q", cluster.params.LogLevel, "debug")
+	}
+}
+
+// TestDeploy_OutcomeReportsChartOverrides pins that a real deploy's outcome,
+// not just its preview, names the overrides it applied. It is the only
+// confirmation the operator gets that the controller is running with them.
+func TestDeploy_OutcomeReportsChartOverrides(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	d, _, _, _, _ := deployFixture(true)
+
+	summary, err := d.Deploy(context.Background(), appWith(root, false), "ecr",
+		Options{ResyncPeriod: 60, LogLevel: "debug"})
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	res := only(t, summary)
+	if res.Outcome != workspace.OutcomeSucceeded {
+		t.Fatalf("outcome = %q, want succeeded; reason: %s", res.Outcome, res.Reason)
+	}
+	if want := "(namespace ack-system) with a 60s default resync period and log level debug;"; !strings.Contains(res.Reason, want) {
+		t.Errorf("reason = %q, want it to contain %q", res.Reason, want)
+	}
+}
+
+// Without overrides the outcome keeps its original shape, with no dangling
+// clause.
+func TestDeploy_OutcomeOmitsOverridesWhenNoneSet(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	d, _, _, _, _ := deployFixture(true)
+
+	summary, err := d.Deploy(context.Background(), appWith(root, false), "ecr", Options{})
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	res := only(t, summary)
+	if !strings.Contains(res.Reason, "(namespace ack-system); ") || strings.Contains(res.Reason, " with ") {
+		t.Errorf("reason = %q, want no override clause", res.Reason)
+	}
+}
+
+// An omitted level must arrive empty so helmUpgradeArgs emits no override and
+// the chart keeps its own default.
+func TestDeploy_UnsetLogLevelLeavesChartDefault(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	d, _, _, cluster, _ := deployFixture(true)
+
+	if _, err := d.Deploy(context.Background(), appWith(root, false), "ecr", Options{}); err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	if cluster.params == nil {
+		t.Fatal("controller was not deployed")
+	}
+	if cluster.params.LogLevel != "" {
+		t.Errorf("DeployParams.LogLevel = %q, want empty", cluster.params.LogLevel)
+	}
+}
+
+// An unknown level is rejected up front as a usage error and does no cluster,
+// build, or deploy work. Passing it through would deploy successfully: the
+// runtime ignores the parse error and logs at info, so the run would look fine
+// while hiding the debug output it was meant to produce.
+func TestDeploy_UnknownLogLevelIsUsageErrorBeforeAnyWork(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	d, builder, registry, cluster, prov := deployFixture(true)
+
+	_, err := d.Deploy(context.Background(), appWith(root, false), "ecr", Options{LogLevel: "verbose"})
+	var ue *UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("error = %v (%T), want *UsageError", err, err)
+	}
+	if !strings.Contains(ue.Msg, "debug, info, warn, error") {
+		t.Errorf("message = %q, want it to list the accepted levels", ue.Msg)
+	}
+	if builder.called || registry.pushed != "" || cluster.params != nil || prov.kubeconfig != nil {
+		t.Error("a rejected log level still built, pushed, deployed, or touched the cluster")
+	}
+}
+
+// TestDeploy_DryRunReportsChartOverrides pins that a preview names every chart
+// override, joined into one clause, so it describes the controller that would
+// actually run.
+func TestDeploy_DryRunReportsChartOverrides(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	d, _, _, _, _ := deployFixture(true)
+
+	summary, err := d.Deploy(context.Background(), appWith(root, true), "ecr",
+		Options{ResyncPeriod: 60, LogLevel: "debug"})
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	res := only(t, summary)
+	if want := "with a 60s default resync period and log level debug"; !strings.Contains(res.Reason, want) {
+		t.Errorf("reason = %q, want it to contain %q", res.Reason, want)
+	}
+}
+
 // --- image reuse -----------------------------------------------------------
 
 // TestDeploy_ReusesExistingImageTag is the headline of the optimization: with

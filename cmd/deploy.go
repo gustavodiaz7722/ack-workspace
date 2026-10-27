@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -90,6 +91,13 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			"to shorten it. Setting it on the deploy rather than a follow-up `helm upgrade` matters " +
 			"because deploy installs the chart with its default values, so an override applied " +
 			"beforehand is discarded.\n\n" +
+			"Log level: the controller logs at info by default, and the lines that show a " +
+			"reconcile step by step — every rm.ReadOne and sdkFind, and each requeue with its delay " +
+			"and reason — are logged only at debug. Pass --log-level debug to see them. It is set on " +
+			"the deploy for the same reason as the resync period: a level raised with a separate " +
+			"`helm upgrade` is reset by the next deploy. The level must be one of " +
+			strings.Join(deployer.ControllerLogLevels, ", ") + "; anything else is refused, because the " +
+			"controller would silently fall back to info.\n\n" +
 			"Target cluster: every deploy targets " + deployer.ClusterName + " in the resolved " +
 			"region. The cluster is not selectable and your current kubeconfig context is never used " +
 			"as-is; deploy repoints the kubeconfig at " + deployer.ClusterName + " on every run, so a " +
@@ -118,6 +126,7 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 			clusterVersion, _ := cmd.Flags().GetString(flagClusterVersion)
 			policyARNs, _ := cmd.Flags().GetStringSlice(flagClusterPolicyARN)
 			resyncPeriod, _ := cmd.Flags().GetInt(flagResyncPeriod)
+			logLevel, _ := cmd.Flags().GetString(flagLogLevel)
 
 			// A missing service identifier is validated by the deployer (which returns a
 			// *deployer.UsageError) so the rule is enforced in a single place.
@@ -131,6 +140,7 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 				ClusterVersion: clusterVersion,
 				PolicyARNs:     policyARNs,
 				ResyncPeriod:   resyncPeriod,
+				LogLevel:       logLevel,
 			})
 			if err != nil {
 				return err
@@ -143,5 +153,6 @@ func newDeployCommand(d deps, res *Result) *cobra.Command {
 	cmd.Flags().String(flagClusterVersion, "", fmt.Sprintf("Kubernetes version used if the %s cluster has to be created (default eksctl's own default version)", deployer.ClusterName))
 	cmd.Flags().StringSlice(flagClusterPolicyARN, nil, fmt.Sprintf("IAM policy ARNs attached to the cluster's pod identity role when it has to be created; repeat or comma-separate for several (default %q, appropriate only for a throwaway development account)", deployer.DefaultPolicyARN))
 	cmd.Flags().Int(flagResyncPeriod, 0, "controller default resync period in seconds, set as reconcile.defaultResyncPeriod on the chart (default the chart's own 36000, ten hours); use a small value such as 60 to observe behavior that only appears across reconciles")
+	cmd.Flags().String(flagLogLevel, "", fmt.Sprintf("controller log level, set as log.level on the chart: one of %s (default the chart's own info); use debug to see each reconcile step and requeue", strings.Join(deployer.ControllerLogLevels, ", ")))
 	return cmd
 }
