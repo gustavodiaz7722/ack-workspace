@@ -362,6 +362,39 @@ func TestRelease_MissingControllerFails(t *testing.T) {
 	}
 }
 
+// TestRelease_RefusesCodeGeneratorOutsideWorkspaceRoot covers a code-generator
+// symlinked in from another workspace. The release script writes
+// "<code-generator>/../<service>-controller" with the symlink resolved, so it
+// would regenerate the other workspace's controller, and the release commit here
+// would be missing the artifacts.
+func TestRelease_RefusesCodeGeneratorOutsideWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "ecr-controller", ".git"))
+	other := t.TempDir()
+	mustMkdir(t, filepath.Join(other, codegenDirName))
+	if err := os.Symlink(filepath.Join(other, codegenDirName), filepath.Join(root, codegenDirName)); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	mr := &git.MockRunner{}
+	script := &fakeScript{}
+
+	summary, err := NewWithScriptRunner(script).Release(
+		context.Background(), appWith(root, mr, githubclient.NewMock(), false), "ecr", Options{Version: "v1.0.1"})
+	if err != nil {
+		t.Fatalf("Release returned error: %v", err)
+	}
+	res := only(t, summary)
+	if res.Outcome != workspace.OutcomeFailed {
+		t.Fatalf("outcome = %q, want failed; reason: %s", res.Outcome, res.Reason)
+	}
+	if !strings.Contains(res.Reason, "outside the workspace root") {
+		t.Errorf("reason = %q, want it to say the code-generator is outside the workspace root", res.Reason)
+	}
+	if script.called || len(mr.Calls) != 0 {
+		t.Errorf("release ran the script or git (%v) against a code-generator outside the workspace root", mr.ArgVectors())
+	}
+}
+
 func TestRelease_DryRunTouchesNothing(t *testing.T) {
 	root := workspaceWithController(t, "ecr-controller")
 	mr := &git.MockRunner{}

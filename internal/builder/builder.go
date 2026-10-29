@@ -162,6 +162,12 @@ func (b *Builder) process(ctx context.Context, ap app.App, alias string, opts Op
 	if !dirExists(codegenPath) {
 		return failed(name, fmt.Errorf("code-generator not found at %s; run `ack-workspace init` first", codegenPath))
 	}
+	// The scripts regenerate "<code-generator>/../<service>-controller" with the
+	// code-generator's symlinks resolved, so one that lives in another tree would
+	// rewrite that tree's controller while this reports the one here.
+	if err := workspace.CheckCodegenLocation(root, codegenPath); err != nil {
+		return failed(name, err)
+	}
 
 	// Read the checked-out branch for reporting only. The build regenerates
 	// against whatever is currently checked out; it never switches branches.

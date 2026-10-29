@@ -130,8 +130,8 @@ func (f *fakeProvisioner) EnsurePodIdentity(_ context.Context, spec PodIdentityS
 // --- helpers ---------------------------------------------------------------
 
 // workspaceWithController builds a temporary workspace root holding a git
-// controller clone with a Helm chart plus a code-generator directory, which is
-// the layout deploy pre-flights for.
+// controller clone with a Helm chart, a code-generator directory, and
+// test-infra's build_config.yaml, which is the layout deploy pre-flights for.
 func workspaceWithController(t *testing.T, controller string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -139,10 +139,15 @@ func workspaceWithController(t *testing.T, controller string) string {
 		filepath.Join(root, controller, ".git"),
 		filepath.Join(root, controller, helmDirName),
 		filepath.Join(root, codegenDirName),
+		filepath.Join(root, testInfraDirName),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
+	}
+	buildConfig := filepath.Join(root, testInfraDirName, testInfraBuildConfig)
+	if err := os.WriteFile(buildConfig, []byte("go_version: 1.26\n"), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", buildConfig, err)
 	}
 	return root
 }
@@ -1002,5 +1007,70 @@ func TestDeploy_DestinationDerivedFromServiceName(t *testing.T) {
 	// is installed into, or the deployed controller has no credentials.
 	if len(prov.serviceAccts) != 1 || prov.serviceAccts[0][0] != Namespace {
 		t.Errorf("service accounts ensured = %v, want one in %s", prov.serviceAccts, Namespace)
+	}
+}
+
+// --- workspace layout -------------------------------------------------------
+
+// TestDeploy_MissingTestInfraFailsBeforeAnyWork covers a workspace without
+// test-infra. build-controller-image.sh reads the Go and base-image versions
+// from test-infra's build_config.yaml, so without it the deploy used to get as
+// far as the image build, after touching the cluster and ECR, and stop with a
+// bare `pushd: ... test-infra: No such file or directory`.
+func TestDeploy_MissingTestInfraFailsBeforeAnyWork(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	if err := os.RemoveAll(filepath.Join(root, testInfraDirName)); err != nil {
+		t.Fatalf("removing test-infra: %v", err)
+	}
+	for _, dryRun := range []bool{false, true} {
+		d, builder, registry, cluster, prov := deployFixture(true)
+		summary, err := d.Deploy(context.Background(), appWith(root, dryRun), "ecr", Options{})
+		if err != nil {
+			t.Fatalf("dry-run=%v: Deploy returned error: %v", dryRun, err)
+		}
+		res := only(t, summary)
+		if res.Outcome != workspace.OutcomeFailed {
+			t.Fatalf("dry-run=%v: outcome = %q, want failed; reason: %s", dryRun, res.Outcome, res.Reason)
+		}
+		if !strings.Contains(res.Reason, testInfraBuildConfig) {
+			t.Errorf("dry-run=%v: reason = %q, want it to name %s", dryRun, res.Reason, testInfraBuildConfig)
+		}
+		if builder.called || registry.pushed != "" || cluster.params != nil || prov.kubeconfig != nil {
+			t.Errorf("dry-run=%v: a workspace without test-infra still built, pushed, deployed, or touched the cluster", dryRun)
+		}
+	}
+}
+
+// TestDeploy_RefusesCodeGeneratorOutsideWorkspaceRoot covers a code-generator
+// symlinked in from another workspace. The image build's Docker context is the
+// code-generator's parent with symlinks resolved, so the deploy would build the
+// other workspace's controller and push it under this checkout's tag.
+func TestDeploy_RefusesCodeGeneratorOutsideWorkspaceRoot(t *testing.T) {
+	root := workspaceWithController(t, "ecr-controller")
+	other := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(other, codegenDirName), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, codegenDirName)); err != nil {
+		t.Fatalf("removing code-generator: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(other, codegenDirName), filepath.Join(root, codegenDirName)); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	d, builder, registry, cluster, prov := deployFixture(true)
+
+	summary, err := d.Deploy(context.Background(), appWith(root, false), "ecr", Options{})
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	res := only(t, summary)
+	if res.Outcome != workspace.OutcomeFailed {
+		t.Fatalf("outcome = %q, want failed; reason: %s", res.Outcome, res.Reason)
+	}
+	if !strings.Contains(res.Reason, "outside the workspace root") {
+		t.Errorf("reason = %q, want it to say the code-generator is outside the workspace root", res.Reason)
+	}
+	if builder.called || registry.pushed != "" || cluster.params != nil || prov.kubeconfig != nil {
+		t.Error("a misplaced code-generator still built, pushed, deployed, or touched the cluster")
 	}
 }

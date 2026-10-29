@@ -359,6 +359,12 @@ and the `make`/`go` toolchain must be on your `PATH`:
 ack-workspace build ecr
 ```
 
+The `code-generator` must be a clone or `git worktree` directly inside the workspace root, not
+a symlink to one elsewhere. Its scripts find the controller relative to their own location
+with symlinks resolved, so through a symlink they would regenerate the other tree's
+controller while `build` reported this one. `build`, `release` and `deploy` refuse that
+layout before doing any work.
+
 This runs `make build-controller SERVICE=ecr` in the `code-generator` directory against
 whatever the controller repository currently has checked out — it never switches branches
 or touches git history.
@@ -384,8 +390,11 @@ ack-workspace build ecr --sdk-version v1.41.0  # pin the aws-sdk-go version
 
 Build a single service controller from your **local checkout** and deploy it to the ACK
 development cluster. Use this to test in-progress changes on a real cluster. The
-controller and the `code-generator` must already be present in your workspace (run `init` and
-`add` first), and `docker`, `aws`, `kubectl`, `helm`, and `eksctl` must be on your `PATH`:
+controller, the `code-generator` and `test-infra` must already be present in your workspace
+(run `init` and `add` first; `init` clones `test-infra`), and `docker`, `aws`, `kubectl`,
+`helm`, and `eksctl` must be on your `PATH`. The image build reads its Go and base-image
+versions from `test-infra/build_config.yaml`, so a workspace without it is refused up front,
+and the `code-generator` must not be a symlink (see [`build`](#build-a-controller-from-local-source)):
 
 ```bash
 ack-workspace deploy ecr

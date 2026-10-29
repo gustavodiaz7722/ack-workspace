@@ -32,7 +32,9 @@
 // RUNTIME_DIR is deliberately not overridden: its default,
 // "<code-generator>/../runtime", already resolves to "<root>/runtime" under any
 // workspace root, so setting it would add a redundant override that could drift
-// from the script's own default.
+// from the script's own default. That holds because the code-generator must sit
+// directly inside the root (see workspace.CheckCodegenLocation), which the
+// release pre-flight enforces.
 package releaser
 
 import (
@@ -199,6 +201,12 @@ func (r *Releaser) process(ctx context.Context, ap app.App, alias, version, base
 	}
 	if !dirExists(codegenPath) {
 		return failed(name, fmt.Errorf("code-generator not found at %s; run `ack-workspace init` first", codegenPath))
+	}
+	// The release script writes "<code-generator>/../<service>-controller" with
+	// the code-generator's symlinks resolved, so one that lives in another tree
+	// would regenerate that tree's controller while this commits the one here.
+	if err := workspace.CheckCodegenLocation(root, codegenPath); err != nil {
+		return failed(name, err)
 	}
 
 	repo := git.NewRepo(controllerPath, ap.Git)

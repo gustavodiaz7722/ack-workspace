@@ -188,6 +188,41 @@ func TestBuild_MissingCodeGeneratorFails(t *testing.T) {
 	}
 }
 
+// TestBuild_RefusesCodeGeneratorOutsideWorkspaceRoot covers a code-generator
+// symlinked in from another workspace. build-controller.sh regenerates
+// "<code-generator>/../<service>-controller" with the symlink resolved, so the
+// build would rewrite the other workspace's controller while reporting this one.
+// Under --dry-run too, so the preview cannot name a branch the build would not
+// touch.
+func TestBuild_RefusesCodeGeneratorOutsideWorkspaceRoot(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		root := t.TempDir()
+		mustMkdir(t, filepath.Join(root, "ecr-controller", ".git"))
+		other := t.TempDir()
+		mustMkdir(t, filepath.Join(other, codegenDirName))
+		if err := os.Symlink(filepath.Join(other, codegenDirName), filepath.Join(root, codegenDirName)); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		maker := &fakeMaker{}
+
+		summary, err := NewWithMakeRunner(maker).Build(
+			context.Background(), appWith(root, branchRunner("main"), dryRun), "ecr", Options{})
+		if err != nil {
+			t.Fatalf("dry-run=%v: Build returned error: %v", dryRun, err)
+		}
+		res := only(t, summary)
+		if res.Outcome != workspace.OutcomeFailed {
+			t.Fatalf("dry-run=%v: outcome = %q, want failed; reason: %s", dryRun, res.Outcome, res.Reason)
+		}
+		if !strings.Contains(res.Reason, "outside the workspace root") {
+			t.Errorf("dry-run=%v: reason = %q, want it to say the code-generator is outside the workspace root", dryRun, res.Reason)
+		}
+		if maker.called {
+			t.Errorf("dry-run=%v: make ran against a code-generator outside the workspace root", dryRun)
+		}
+	}
+}
+
 func TestBuild_MakeFailurePropagatesAsFailed(t *testing.T) {
 	root := workspaceWithController(t, "ecr-controller")
 	maker := &fakeMaker{err: errors.New("boom")}

@@ -49,6 +49,12 @@ const (
 	codegenDirName = "code-generator"
 	// helmDirName is the controller subdirectory holding its Helm chart.
 	helmDirName = "helm"
+	// testInfraDirName is the directory under the workspace root that holds
+	// test-infra. The image build script reads the Go and base-image versions from
+	// its build_config.yaml (testInfraBuildConfig) and has no override for the
+	// location.
+	testInfraDirName     = "test-infra"
+	testInfraBuildConfig = "build_config.yaml"
 	// imageBuildScript is the code-generator script that builds a controller's
 	// container image. It is invoked from the code-generator directory and honors
 	// the AWS_SERVICE_DOCKER_IMG environment variable for the output image
@@ -288,6 +294,17 @@ func (d *Deployer) process(ctx context.Context, ap app.App, alias string, opts O
 	}
 	if !dirExists(codegenPath) {
 		return failed(name, fmt.Errorf("code-generator not found at %s; run `ack-workspace init` first", codegenPath))
+	}
+	// The image build uses "<code-generator>/.." as its Docker context, with the
+	// code-generator's symlinks resolved, so one that lives in another tree would
+	// build that tree's controller under this checkout's tag.
+	if err := workspace.CheckCodegenLocation(root, codegenPath); err != nil {
+		return failed(name, err)
+	}
+	if buildConfig := filepath.Join(root, testInfraDirName, testInfraBuildConfig); !dirExists(buildConfig) {
+		return failed(name, fmt.Errorf(
+			"%s not found; the image build reads the Go and base-image versions from it, so test-infra must be in the workspace (run `ack-workspace init`)",
+			buildConfig))
 	}
 	if !dirExists(chartPath) {
 		return failed(name, fmt.Errorf("Helm chart not found at %s", chartPath))
